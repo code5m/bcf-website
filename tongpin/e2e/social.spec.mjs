@@ -14,7 +14,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await page.locator('#add-form [name="title"]').fill("AI 电影制作入门");
     await page.locator('#add-form [name="tags"]').fill("电影,AI");
     await page.locator('#add-form [name="notes"]').fill("私密笔记："+tag);
-    await page.locator('#add-form button[type="submit"]').click();
+    await page.locator('#add-form .button-primary').click();
     await expect(page.locator("#stat-count")).toHaveText("1");
     await expect(page.locator("#library-list")).toContainText("私密笔记："+tag);
     await page.locator("#library-list [data-action=toggle]").click();
@@ -38,7 +38,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await page.locator("[data-tab=account]").click();
     await page.locator('#profile-form [name="topics"]').fill("电影,AI");
     await page.locator('#profile-form [name="discoverable"]').check();
-    await page.locator('#profile-form button[type="submit"]').click();
+    await page.locator('#profile-form .button-primary').click();
   }
   try {
     await addPrivate(a,"Alice的内容");
@@ -58,7 +58,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await a.locator("#refresh-friends").click();
     await a.locator("#friends-list [data-action=chat]").click();
     await a.locator("#chat-text").fill("一起学习电影制作吗？");
-    await a.locator('#chat-form button[type="submit"]').click();
+    await a.locator('#chat-form .button-primary').click();
     await expect(a.locator("#chat-list")).toContainText("一起学习电影制作吗？");
     await b.locator("#refresh-friends").click();
     await b.locator("#friends-list [data-action=chat]").click();
