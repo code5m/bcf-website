@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+runtime
+dist
+coverage
+apps
+.env
+.env.*
+test-results
+playwright-report
+*.log
+**/.DS_Store
+**/build
+**/.gradle

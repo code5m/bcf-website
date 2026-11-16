@@ -1,0 +1,10 @@
+{$TONGPIN_DOMAIN} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options "nosniff"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+    reverse_proxy app:4173
+}
