@@ -25,3 +25,6 @@
 ## 没有实际凭据不能自动完成的外部动作
 - 真实服务器、域名和 DNS；Android 正式签名及 Play Console 发布；Apple Developer/签名/TestFlight/App Store 发布；商业主体、支付商户及法域审批。
 - GitHub Actions 产出的 Android debug APK 与 iOS simulator 包仅证明开发/测试版本构建成功，不代表正式应用商店包，也不能用于公网上线安全背书。
+
+## 内测邀请
+生产 Docker 配置默认 TONGPIN_INVITE_ONLY=1。首次部署由管理员在 /tongpin/admin.html 生成一次性邀请码（7天有效），由邀请的成年人注册；禁止无邀请码公开注册。发送邀请码前需要核实受邀用户身份与同意政策。管理员报告列表可标记、驳回或暂停被举报账号，仍需要真实的人负责管理。

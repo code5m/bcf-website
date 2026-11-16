@@ -80,3 +80,56 @@ test("real API: private by default, opt-in, mutual friend consent, message, bloc
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+test("invite-only deployment: admin issues single-use codes, reports and suspensions retain export rights", async()=>{
+  const prev={invite:process.env.TONGPIN_INVITE_ONLY,admin:process.env.TONGPIN_ADMIN_TOKEN};
+  process.env.TONGPIN_INVITE_ONLY="1";
+  process.env.TONGPIN_ADMIN_TOKEN="a".repeat(64);
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-invites-"));
+  const route=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>route(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(done=>server.listen(0,"127.0.0.1",done));
+  const base="http://127.0.0.1:"+server.address().port;
+  const request=async(path,method="GET",data,auth="",token="")=>{
+    const r=await fetch(base+"/api/social"+path,{
+      method,headers:{Origin:base,"Content-Type":"application/json","X-Tongpin-Request":"1",
+        ...(auth?{Cookie:auth}:{}),...(token?{Authorization:"Bearer "+token}:{})},
+      body:data===undefined?undefined:JSON.stringify(data)
+    });
+    return {code:r.status,body:await r.json(),cookie:(r.headers.get("set-cookie")||"").split(";")[0]};
+  };
+  const create=(handle,inviteCode)=>request("/register","POST",{
+    handle,password:"long-password-123",adult:true,acceptTerms:true,inviteCode
+  });
+  try{
+    assert.equal((await create("first_user","")).code,403);
+    assert.equal((await request("/moderation/invites","POST",{count:2})).code,403);
+    const admin=await request("/moderation/invites","POST",{count:2},"",process.env.TONGPIN_ADMIN_TOKEN);
+    assert.equal(admin.code,201);assert.equal(admin.body.codes.length,2);
+    const first=await create("first_user",admin.body.codes[0]);
+    assert.equal(first.code,201);
+    assert.equal((await create("reused",admin.body.codes[0])).code,403);
+    const second=await create("second_user",admin.body.codes[1]);
+    assert.equal(second.code,201);
+    const report=await request("/reports","POST",{
+      targetId:second.body.user.id,reason:"spam",details:"test report"
+    },first.cookie);
+    assert.equal(report.code,201);
+    const reports=await request("/moderation/reports","GET",undefined,"",process.env.TONGPIN_ADMIN_TOKEN);
+    assert.equal(reports.code,200);
+    assert.equal(reports.body.reports.length,1);
+    const reportId=reports.body.reports[0].id;
+    assert.equal((await request("/moderation/reports/"+reportId,"PUT",{action:"suspend"},"",process.env.TONGPIN_ADMIN_TOKEN)).code,200);
+    assert.equal((await request("/people","GET",undefined,second.cookie)).code,403);
+    assert.equal((await request("/account/export","GET",undefined,second.cookie)).code,200);
+    assert.equal((await request("/account","DELETE",{password:"long-password-123"},second.cookie)).code,200);
+    assert.equal((await request("/session","GET",undefined,second.cookie)).body.user,null);
+  }finally{
+    await new Promise(done=>server.close(done));
+    await rm(dir,{recursive:true,force:true});
+    if(prev.invite===undefined)delete process.env.TONGPIN_INVITE_ONLY;
+    else process.env.TONGPIN_INVITE_ONLY=prev.invite;
+    if(prev.admin===undefined)delete process.env.TONGPIN_ADMIN_TOKEN;
+    else process.env.TONGPIN_ADMIN_TOKEN=prev.admin;
+  }
+});

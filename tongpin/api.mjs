@@ -13,7 +13,7 @@ const publicProfile = user => ({
   topics: user.profile.topics, discoverable: user.profile.discoverable,
   showcase: user.showcase
 });
-const ownProfile = user => ({...publicProfile(user), blocked: user.blocked || [], createdAt: user.createdAt});
+const ownProfile = user => ({...publicProfile(user), blocked: user.blocked || [], createdAt: user.createdAt, suspendedUntil: user.suspendedUntil || null});
 const peersBlocked = (a, b) => (a.blocked || []).includes(b.id) || (b.blocked || []).includes(a.id);
 function passwordHash(password) {
   const salt = randomBytes(16).toString("hex");
@@ -30,12 +30,12 @@ function cookieToken(req) {
   const token = part ? part.slice("tongpin_session=".length) : "";
   return /^[a-f0-9]{64}$/.test(token) ? token : null;
 }
-function auth(db, req) {
+function auth(db, req, {allowSuspended = false} = {}) {
   const token = cookieToken(req);
   const session = token && db.sessions.find(s => s.key === sha(token) && s.expires > Date.now());
   const user = session && db.users.find(u => u.id === session.userId);
   if (!user) fail(401, "login_required");
-  if (user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()) fail(403, "account_suspended");
+  if (!allowSuspended && user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()) fail(403, "account_suspended");
   return user;
 }
 function json(res, status, value, headers = {}) {
@@ -171,6 +171,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         const db = await read();
         const user = db.users.find(u => u.handle === cleanText(input.handle, 30).toLowerCase());
         if (!user || !passwordValid(String(input.password || ""), user.passwordHash)) fail(401, "invalid_credentials");
+        if (user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()) fail(403, "account_suspended");
         const token = randomBytes(32).toString("hex");
         await transaction(fresh => {
           if (!fresh.users.some(u => u.id === user.id)) fail(401, "invalid_credentials");
@@ -192,12 +193,12 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       if (method === "GET" && path === "/session") {
         const db = await read();
         let user = null;
-        try { user = auth(db, req); } catch {}
+        try { user = auth(db, req, {allowSuspended:true}); } catch {}
         json(res, 200, {user: user ? ownProfile(user) : null});
         return true;
       }
       if (method === "GET" && path === "/account/export") {
-        const db=await read(), me=auth(db,req);
+        const db=await read(), me=auth(db,req,{allowSuspended:true});
         json(res,200,{
           type:"tongpin_social_account_export",exportedAt:new Date().toISOString(),account:ownProfile(me),
           connections:db.connections.filter(c=>c.from===me.id||c.to===me.id),
@@ -403,7 +404,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       if (method === "DELETE" && path === "/account") {
         const input = await methodBody(req);
         await transaction(db => {
-          const me = auth(db, req);
+          const me = auth(db, req, {allowSuspended:true});
           if (!passwordValid(String(input.password || ""), me.passwordHash)) fail(403, "password_confirmation_required");
           db.users = db.users.filter(u => u.id !== me.id);
           db.sessions = db.sessions.filter(s => s.userId !== me.id);

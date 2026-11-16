@@ -7,6 +7,7 @@ const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({
 const errors = {
   login_required:"请先登录，私人收藏仍可离线使用。",
   invite_code_required:"此服务实行邀请制，请填写未使用的有效邀请码。",
+  account_suspended:"当前账号已暂停社交操作，可导出数据或申请删除。",
   invalid_credentials:"用户名或密码错误。",
   handle_taken:"用户名已被使用，请换一个。",
   invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
@@ -213,7 +214,7 @@ function renderConnections() {
       escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
       '<p>'+ (c.status==="accepted"?"已成为好友":c.direction==="incoming"?"对方向你发来交友申请":"等待对方接受申请")+'</p><div class="card-actions">'+
       (c.status==="pending"&&c.direction==="incoming"?'<button class="highlight" data-action="accept" data-id="'+c.id+'">同意</button><button data-action="decline" data-id="'+c.id+'">拒绝</button>':"")+
-      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button>':"")+
+      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button><button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
       '<button data-action="block" data-id="'+c.peer.id+'">拉黑</button><button data-action="report" data-id="'+c.peer.id+'">举报</button></div></article>').join("")
     :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
   $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
@@ -330,6 +331,10 @@ async function actionHandler(event) {
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
       await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
+    }else if(action==="unfriend"){
+      if(!confirm("确认解除好友关系？"))return;
+      await api("/connections/"+id,"DELETE",{});
+      state.chatPeer=null;renderChat();await refreshConnections();notify("已解除好友关系。");
     }else if(action==="unblock"){
       await api("/blocks/"+id,"DELETE",{});notify("已解除拉黑。");await refreshConnections();
     }else if(action==="report"){
@@ -400,6 +405,16 @@ function wire() {
         city:form.get("city"),discoverable:form.get("discoverable")==="on"};
       state.user=(await api("/me","PUT",data)).user;
       renderAuth();notify("公开资料已更新。");
+    }catch(e){notify(e.message,true);}
+  };
+  $("export-social").onclick=async()=>{
+    try{
+      const response=await fetch("/api/social/account/export",{credentials:"same-origin",cache:"no-store"});
+      if(!response.ok)throw Error("账户数据导出失败："+response.status);
+      const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=url;a.download="tongpin-social-account-"+new Date().toISOString().slice(0,10)+".json";
+      a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");
     }catch(e){notify(e.message,true);}
   };
   $("logout").onclick=async()=>{
