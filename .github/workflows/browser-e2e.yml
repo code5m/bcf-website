@@ -1,10 +1,6 @@
 name: Tongpin Browser E2E
 on:
-  push:
-    branches: [feature/tongpin-social-mvp-20261116]
-    paths: ['tongpin/**','server.mjs','.github/workflows/browser-e2e.yml']
-  pull_request:
-    paths: ['tongpin/**','server.mjs','.github/workflows/browser-e2e.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

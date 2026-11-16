@@ -1,10 +1,6 @@
 name: Build Tongpin Android and iOS
 on:
-  push:
-    branches: [feature/tongpin-social-mvp-20261116]
-    paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
-  pull_request:
-    paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

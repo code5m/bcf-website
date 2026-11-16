@@ -6,14 +6,7 @@ on:
       - 'server.mjs'
       - 'package.json'
       - '.github/workflows/tongpin-ci.yml'
-  push:
-    branches:
-      - feature/tongpin-social-mvp-20261116
-    paths:
-      - 'tongpin/**'
-      - 'server.mjs'
-      - 'package.json'
-      - '.github/workflows/tongpin-ci.yml'
+  workflow_dispatch:
 jobs:
   node-tests:
     runs-on: ubuntu-latest

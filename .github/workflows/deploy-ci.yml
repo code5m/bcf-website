@@ -1,0 +1,52 @@
+name: Tongpin Docker Production Packaging Check
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose.yaml'
+      - 'deploy/**'
+      - 'tongpin/**'
+      - 'server.mjs'
+      - '.github/workflows/deploy-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build container
+        run: docker build -t tongpin-ci:test .
+      - name: Validate Compose manifest
+        run: |
+          export TONGPIN_DOMAIN="test.example.com"
+          export TONGPIN_ADMIN_TOKEN="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          docker compose config --quiet
+      - name: Start production-mode container and check safety gates
+        run: |
+          set -eu
+          docker run -d --name tongpin-ci -p 127.0.0.1:4189:4173 \
+            -e NODE_ENV=production -e HOST=0.0.0.0 \
+            -e TONGPIN_PUBLIC_ORIGIN=https://example.com \
+            -e TONGPIN_INVITE_ONLY=1 \
+            -e TONGPIN_ADMIN_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            tongpin-ci:test
+          trap 'docker logs tongpin-ci || true; docker rm -f tongpin-ci >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 15); do
+            if curl -fsS http://127.0.0.1:4189/api/social/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4189/api/social/health | grep -q '"ok":true'
+          curl -fsS http://127.0.0.1:4189/tongpin/ | grep -q '因收藏而相识'
+          code=$(curl -s -o /tmp/restricted.json -w "%{http_code}" \
+            -X POST http://127.0.0.1:4189/api/social/register \
+            -H 'Host: example.com' -H 'Origin: https://example.com' \
+            -H 'X-Tongpin-Request: 1' -H 'Content-Type: application/json' \
+            --data '{"handle":"pilotuser","password":"long-password-123","adult":true,"acceptTerms":true}')
+          test "$code" = "403"
+          grep -q 'invite_code_required' /tmp/restricted.json
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4189/runtime/social/social.sqlite)
+          test "$code" = "404"
