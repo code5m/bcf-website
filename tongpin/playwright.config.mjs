@@ -10,6 +10,7 @@ export default defineConfig({
   use:{baseURL:"http://127.0.0.1:4173",trace:"retain-on-failure",...devices["Desktop Chrome"]},
   webServer:{
     command:"node server.mjs",
+    cwd:resolve("."),
     url:"http://127.0.0.1:4173/api/social/health",
     reuseExistingServer:false,
     timeout:30000,
