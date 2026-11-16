@@ -34,24 +34,31 @@ struct SavedVideo: Codable, Identifiable, Hashable {
     }
     func importJSON(_ data: Data) throws -> Int {
         let raw = try JSONSerialization.jsonObject(with: data)
-        var container: Any = raw
-        if let dictionary = container as? [String: Any] { container = dictionary["state"] ?? dictionary }
-        guard let obj = container as? [String: Any] else {
-            throw NSError(domain: "Tongpin", code: 1, userInfo: [NSLocalizedDescriptionKey:"不支持的 JSON 结构"])
-        }
-        let rawVideos = obj["videos"] ?? obj["records"] ?? obj["items"]
         let rows: [[String: Any]]
-        if let array = rawVideos as? [[String: Any]] {
-            rows = array
-        } else if let dictionary = rawVideos as? [String: Any] {
-            rows = dictionary.values.compactMap { $0 as? [String: Any] }
+        var categories: [String: String] = [:]
+        if let direct = raw as? [[String: Any]] {
+            rows = direct
         } else {
-            throw NSError(domain: "Tongpin", code: 2, userInfo: [NSLocalizedDescriptionKey:"找不到视频记录"])
+            var container: Any = raw
+            if let dictionary = container as? [String: Any] {
+                container = dictionary["state"] ?? dictionary
+            }
+            guard let obj = container as? [String: Any] else {
+                throw NSError(domain:"Tongpin",code:1,userInfo:[NSLocalizedDescriptionKey:"不支持的 JSON 结构"])
+            }
+            let rawVideos = obj["videos"] ?? obj["records"] ?? obj["items"]
+            if let array = rawVideos as? [[String: Any]] {
+                rows = array
+            } else if let dictionary = rawVideos as? [String: Any] {
+                rows = dictionary.values.compactMap { $0 as? [String: Any] }
+            } else {
+                throw NSError(domain:"Tongpin",code:2,userInfo:[NSLocalizedDescriptionKey:"找不到视频记录"])
+            }
+            categories = (obj["library"] as? [String: Any])?["categories"] as? [String: String] ?? [:]
         }
         guard rows.count <= 30000 else {
-            throw NSError(domain: "Tongpin", code: 3, userInfo: [NSLocalizedDescriptionKey:"一次最多导入30000条"])
+            throw NSError(domain:"Tongpin",code:3,userInfo:[NSLocalizedDescriptionKey:"一次最多导入30000条"])
         }
-        let categories = (obj["library"] as? [String: Any])?["categories"] as? [String: String] ?? [:]
         var byID = Dictionary(uniqueKeysWithValues: videos.map { ($0.bvid, $0) })
         var imported = 0
         for row in rows {
@@ -92,8 +99,6 @@ struct ExportArchive: FileDocument {
         videos=try JSONDecoder().decode([SavedVideo].self,from:data)
     }
     func fileWrapper(configuration:WriteConfiguration) throws -> FileWrapper {
-        let data = try JSONEncoder().encode(["version":1] as [String:Int])
-        _ = data // Serialize complete private record set below.
         let full = try JSONEncoder().encode(videos)
         return FileWrapper(regularFileWithContents:full)
     }

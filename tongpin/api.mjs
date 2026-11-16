@@ -123,7 +123,8 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
     return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
-    const ip = String(req.socket.remoteAddress || "local");
+    const forwarded=process.env.TONGPIN_TRUST_PROXY === "1" ? String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
+    const ip = forwarded || String(req.socket.remoteAddress || "local");
     const key = group + ":" + ip;
     const now = Date.now();
     const current = (rate.get(key) || []).filter(x => x > now - windowMs);

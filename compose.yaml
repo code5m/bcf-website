@@ -11,6 +11,7 @@ services:
       TONGPIN_PUBLIC_ORIGIN: https://${TONGPIN_DOMAIN:?TONGPIN_DOMAIN_required}
       TONGPIN_ADMIN_TOKEN: ${TONGPIN_ADMIN_TOKEN:?TONGPIN_ADMIN_TOKEN_required}
       TONGPIN_INVITE_ONLY: "1"
+      TONGPIN_TRUST_PROXY: "1"
     volumes:
       - tongpin_runtime:/app/runtime
     read_only: true
