@@ -1,1 +1,13 @@
-{"name":"bcf-website","private":true,"version":"1.0.0","type":"module","scripts":{"start":"node server.mjs"},"engines":{"node":">=20"}}
+{
+  "name": "bcf-website",
+  "private": true,
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tongpin/tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

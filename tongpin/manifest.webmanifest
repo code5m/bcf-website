@@ -1,0 +1,18 @@
+{
+  "name": "同频 · 因收藏而相识",
+  "short_name": "同频",
+  "description": "本地收藏，精选分享，共同兴趣交友",
+  "start_url": "/tongpin/",
+  "scope": "/tongpin/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/tongpin/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

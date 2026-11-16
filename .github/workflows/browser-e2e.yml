@@ -1,0 +1,25 @@
+name: Tongpin Browser E2E
+on:
+  pull_request:
+    paths: ['tongpin/**','server.mjs','.github/workflows/browser-e2e.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test -c tongpin/playwright.config.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: tongpin-browser-failure-traces
+          path: test-results/
+          retention-days: 7
