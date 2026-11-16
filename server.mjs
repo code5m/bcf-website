@@ -6,8 +6,8 @@ import {createSocialApi} from "./tongpin/api.mjs";
 
 if (process.env.NODE_ENV === "production") {
   const origin=process.env.TONGPIN_PUBLIC_ORIGIN || "";
-  if (!origin.startsWith("https://") || !process.env.TONGPIN_ADMIN_TOKEN || process.env.TONGPIN_ADMIN_TOKEN.length < 32) {
-    throw Error("Production requires TONGPIN_PUBLIC_ORIGIN=https://... and a long TONGPIN_ADMIN_TOKEN");
+  if (!origin.startsWith("https://") || !process.env.TONGPIN_ADMIN_TOKEN || process.env.TONGPIN_ADMIN_TOKEN.length < 32 || process.env.TONGPIN_INVITE_ONLY !== "1") {
+    throw Error("Production requires HTTPS origin, admin token, and invite-only registration");
   }
 }
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));

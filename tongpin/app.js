@@ -6,6 +6,7 @@ const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({
 }[c]));
 const errors = {
   login_required:"请先登录，私人收藏仍可离线使用。",
+  invite_code_required:"此服务实行邀请制，请填写未使用的有效邀请码。",
   invalid_credentials:"用户名或密码错误。",
   handle_taken:"用户名已被使用，请换一个。",
   invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
@@ -381,6 +382,7 @@ function wire() {
     const body={handle:values.get("handle"),password:values.get("password")};
     if(state.authMode==="register"){
       body.displayName=values.get("displayName");
+      body.inviteCode=values.get("inviteCode");
       body.adult=values.get("adult")==="on";
       body.acceptTerms=body.adult;
     }

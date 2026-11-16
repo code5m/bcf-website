@@ -42,3 +42,13 @@ async function refresh(){
  }catch(e){status("无法读取举报："+e.message);}
 }
 $("refresh").onclick=refresh;
+
+$("invite-create").onclick=async()=>{
+ secret=$("secret").value.trim();
+ if(secret.length<32){status("请先输入正确的管理员密钥");return;}
+ try{
+   const {codes}=await call("/moderation/invites","POST",{count:5});
+   $("invites").textContent=codes.join("\n");
+   status("邀请码已生成：请安全转交给邀请用户，本页面不保存明文，刷新后不可再次查看。");
+ }catch(e){status("创建邀请码失败："+e.message);}
+};

@@ -4,7 +4,7 @@ import {resolve} from "node:path";
 import {cleanText, cleanTopics, matchPublic, normalizeShowcase} from "./core.js";
 
 const SESSION_AGE = 7 * 86400 * 1000;
-const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: []});
+const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: []});
 const sha = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
 const publicProfile = user => ({
@@ -148,6 +148,13 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         const token = randomBytes(32).toString("hex");
         const result = await transaction(db => {
           if (db.users.some(u => u.handle === handle)) fail(409, "handle_taken");
+          if (process.env.TONGPIN_INVITE_ONLY === "1") {
+            const invite=String(input.inviteCode || "").trim();
+            const entry=(db.invites || []).find(i => i.codeHash === sha(invite) &&
+                !i.usedAt && i.expiresAt > Date.now());
+            if (!entry) fail(403, "invite_code_required");
+            entry.usedAt = Date.now();
+          }
           const user = {id: randomUUID(), handle, passwordHash: passwordHash(password), createdAt: new Date().toISOString(),
             profile: {displayName: cleanText(input.displayName, 30) || handle, bio: "", topics: [], city: "", discoverable: false},
             showcase: [], blocked: []};
@@ -197,6 +204,24 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           messages:db.messages.filter(m=>m.from===me.id||m.to===me.id),
           reports:db.reports.filter(r=>r.from===me.id)
         },{"Content-Disposition":'attachment; filename="tongpin-social-export.json"'});
+        return true;
+      }
+      if (method === "POST" && path === "/moderation/invites") {
+        verifyAdmin(req);
+        const input=await methodBody(req);
+        const count=Number(input.count);
+        if (!Number.isInteger(count) || count < 1 || count > 20) fail(400, "invalid_invite_count");
+        const codes=await transaction(db=>{
+          db.invites ||= [];
+          const items=[];
+          for(let i=0;i<count;i++){
+            const code=randomBytes(16).toString("hex");
+            db.invites.push({codeHash:sha(code),expiresAt:Date.now()+7*86400000,usedAt:null});
+            items.push(code);
+          }
+          return items;
+        });
+        json(res,201,{codes,expiresInDays:7});
         return true;
       }
       if (method === "GET" && path === "/moderation/reports") {

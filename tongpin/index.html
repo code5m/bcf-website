@@ -73,6 +73,7 @@
         <div class="auth-tabs"><button id="auth-mode-register" class="active">注册</button><button id="auth-mode-login">登录</button></div>
         <form id="auth-form" class="stacked-form">
           <label>用户名（英文、数字或下划线）<input name="handle" required minlength="3" maxlength="20" autocomplete="username" pattern="[a-z0-9_]{3,20}"></label>
+          <label>邀请码（私有测试部署时必填）<input name="inviteCode" maxlength="64" autocomplete="off" placeholder="管理员提供的一次性邀请码"></label>
           <label id="display-name-field">显示名称<input name="displayName" maxlength="30"></label>
           <label>密码（至少 12 位）<input name="password" required minlength="12" maxlength="128" type="password" autocomplete="new-password"></label>
           <label id="adult-field" class="check-label"><input name="adult" type="checkbox"> 我已年满 18 岁，且同意 <a href="/tongpin/terms.html" target="_blank">使用条款与隐私说明</a></label>
