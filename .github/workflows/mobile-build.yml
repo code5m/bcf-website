@@ -1,0 +1,62 @@
+name: Build Tongpin Android and iOS
+on:
+  push:
+    branches: [feature/tongpin-social-mvp-20261116]
+    paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
+  pull_request:
+    paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
+permissions:
+  contents: read
+jobs:
+  android-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Assemble Android debug APK
+        run: gradle --no-daemon --project-dir apps/android :app:assembleDebug
+      - name: Confirm compiled APK
+        run: test -s apps/android/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tongpin-android-debug-apk
+          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+  ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: cd apps/ios && xcodegen generate
+      - name: Compile iOS simulator app
+        run: |
+          xcodebuild -project apps/ios/Tongpin.xcodeproj -scheme Tongpin \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath apps/ios/build CODE_SIGNING_ALLOWED=NO build
+      - name: Archive simulator app
+        run: |
+          test -d apps/ios/build/Build/Products/Debug-iphonesimulator/Tongpin.app
+          ditto -c -k --sequesterRsrc --keepParent \
+            apps/ios/build/Build/Products/Debug-iphonesimulator/Tongpin.app \
+            apps/ios/tongpin-ios-simulator.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tongpin-ios-simulator-app
+          path: apps/ios/tongpin-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 30

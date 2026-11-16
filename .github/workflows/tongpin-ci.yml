@@ -22,11 +22,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Syntax check
         run: |
           node --check server.mjs
           node --check tongpin/api.mjs
+          node --check tongpin/store.mjs
           node --check tongpin/core.js
           node --check tongpin/app.js
           node --check tongpin/sw.js
