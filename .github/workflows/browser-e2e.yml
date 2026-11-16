@@ -1,5 +1,7 @@
 name: Tongpin Browser E2E
 on:
+  pull_request:
+    paths: ['tongpin/**','server.mjs','.github/workflows/browser-e2e.yml']
   workflow_dispatch:
 permissions:
   contents: read
