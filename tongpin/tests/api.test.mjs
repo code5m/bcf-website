@@ -46,6 +46,9 @@ test("real API: private by default, opt-in, mutual friend consent, message, bloc
     const b = await req("/register","POST",{handle:"bob_1",password:"strongpass-456",adult:true,acceptTerms:true,displayName:"Bob"});
     assert.equal(a.status,201);
     assert.equal(b.status,201);
+    assert.equal((await req("/logout","POST",{})).status,200);
+    assert.ok((await req("/session","GET",undefined,a.cookie)).body.user);
+    assert.ok((await req("/session","GET",undefined,b.cookie)).body.user);
     assert.equal((await req("/people","GET",undefined,a.cookie)).body.people.length,0);
     assert.equal((await req("/me","PUT",profile("Alice",true),a.cookie)).status,409);
     assert.equal((await req("/showcase","PUT",showcase("BV1234567890"),a.cookie)).status,200);

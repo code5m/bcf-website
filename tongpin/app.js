@@ -432,7 +432,7 @@ async function init() {
   try {db=await openLocal();await refreshLocal();}
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
-  if("serviceWorker" in navigator&&location.protocol==="https:"||"serviceWorker" in navigator&&location.hostname==="localhost"){
+  if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/tongpin/sw.js",{scope:"/tongpin/"}).catch(()=>{});
   }
 }

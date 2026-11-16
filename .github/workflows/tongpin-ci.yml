@@ -1,0 +1,51 @@
+name: Tongpin MVP Verification
+on:
+  pull_request:
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'package.json'
+      - '.github/workflows/tongpin-ci.yml'
+  push:
+    branches:
+      - feature/tongpin-social-mvp-20261116
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'package.json'
+      - '.github/workflows/tongpin-ci.yml'
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check server.mjs
+          node --check tongpin/api.mjs
+          node --check tongpin/core.js
+          node --check tongpin/app.js
+          node --check tongpin/sw.js
+      - name: Unit and API tests
+        run: npm test
+      - name: HTTP smoke checks
+        run: |
+          set -eu
+          node server.mjs > /tmp/tongpin.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:4173/api/social/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173/tongpin/ | grep -q '因收藏而相识'
+          curl -fsS http://127.0.0.1:4173/tongpin/app.js | grep -q 'normalizeImported'
+          curl -fsS http://127.0.0.1:4173/ | grep -q '专题视频库'
+          if curl -fsS http://127.0.0.1:4173/runtime/social/social.json >/dev/null; then
+            echo 'ERROR: runtime files exposed'
+            exit 1
+          fi

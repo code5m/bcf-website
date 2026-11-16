@@ -174,7 +174,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       if (method === "POST" && path === "/logout") {
         await transaction(db => {
           const token = cookieToken(req);
-          db.sessions = db.sessions.filter(s => !token || s.key !== sha(token));
+          if (token) db.sessions = db.sessions.filter(s => s.key !== sha(token));
           return true;
         });
         json(res, 200, {ok: true}, {"Set-Cookie": setCookie(req, "", 0)});
