@@ -14,6 +14,8 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.EditText;
+import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.webkit.WebViewAssetLoader;
@@ -74,7 +76,22 @@ public final class MainActivity extends Activity {
                 }
             }
         });
-        setContentView(webView);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        Button connect = new Button(this);
+        connect.setText("连接 HTTPS 社交服务");
+        connect.setOnClickListener(v -> connectServer());
+        Button offline = new Button(this);
+        offline.setText("离线私人收藏");
+        offline.setOnClickListener(v -> openOffline());
+        header.addView(connect, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2));
+        header.addView(offline, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(header);
+        root.addView(webView, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        setContentView(root);
         String origin = getPreferences(MODE_PRIVATE).getString("server", "");
         if (!origin.isEmpty()) {
             remoteOrigin = origin;
@@ -99,13 +116,16 @@ public final class MainActivity extends Activity {
     }
 
     @Override public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == 2) {
-            remoteOrigin = null;
-            getPreferences(MODE_PRIVATE).edit().remove("server").apply();
-            webView.loadUrl(OFFLINE);
-            return true;
-        }
-        if (item.getItemId() == 1) {
+        if (item.getItemId() == 2) { openOffline(); return true; }
+        if (item.getItemId() == 1) { connectServer(); return true; }
+        return super.onOptionsItemSelected(item);
+    }
+    private void openOffline() {
+        remoteOrigin = null;
+        getPreferences(MODE_PRIVATE).edit().remove("server").apply();
+        webView.loadUrl(OFFLINE);
+    }
+    private void connectServer() {
             EditText input = new EditText(this);
             input.setSingleLine(true);
             input.setText(remoteOrigin == null ? "" : remoteOrigin);
@@ -129,9 +149,6 @@ public final class MainActivity extends Activity {
                         Toast.makeText(this, "请输入有效 HTTPS 域名", Toast.LENGTH_LONG).show();
                     }
                 }).show();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
     }
     @Override public void onBackPressed() {
         if (webView.canGoBack()) webView.goBack();
