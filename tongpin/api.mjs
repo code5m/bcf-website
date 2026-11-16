@@ -1,6 +1,6 @@
 import {createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual} from "node:crypto";
-import {readFile, mkdir, writeFile, rename, chmod} from "node:fs/promises";
-import {join, resolve} from "node:path";
+import {SocialStore} from "./store.mjs";
+import {resolve} from "node:path";
 import {cleanText, cleanTopics, matchPublic, normalizeShowcase} from "./core.js";
 
 const SESSION_AGE = 7 * 86400 * 1000;
@@ -35,6 +35,7 @@ function auth(db, req) {
   const session = token && db.sessions.find(s => s.key === sha(token) && s.expires > Date.now());
   const user = session && db.users.find(u => u.id === session.userId);
   if (!user) fail(401, "login_required");
+  if (user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()) fail(403, "account_suspended");
   return user;
 }
 function json(res, status, value, headers = {}) {
@@ -91,6 +92,12 @@ function connected(db, a, b) {
 function visiblePeer(db, user, peer) {
   return user.id !== peer.id && !peersBlocked(user, peer) && peer.profile.discoverable && peer.showcase.length > 0;
 }
+function verifyAdmin(req) {
+  const token=process.env.TONGPIN_ADMIN_TOKEN || "";
+  const actual=String(req.headers.authorization||"").replace(/^Bearer /,"");
+  if(!token || !actual || actual.length!==token.length)fail(403,"admin_access_denied");
+  if(!timingSafeEqual(Buffer.from(actual),Buffer.from(token)))fail(403,"admin_access_denied");
+}
 function connectionPayload(db, relation, ownerId) {
   const peer = byId(db, relation.from === ownerId ? relation.to : relation.from);
   return {id: relation.id, direction: relation.from === ownerId ? "outgoing" : "incoming",
@@ -98,26 +105,21 @@ function connectionPayload(db, relation, ownerId) {
 }
 
 export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
-  const file = join(dataDir, "social.json");
+  const store = new SocialStore(dataDir,empty);
   let serial = Promise.resolve();
   const rate = new Map();
-  async function read() {
-    try { return JSON.parse(await readFile(file, "utf8")); }
-    catch (e) { if (e.code === "ENOENT") return empty(); throw e; }
-  }
+  async function read() { return store.read(); }
   async function transaction(action) {
-    const task = serial.then(async () => {
-      const db = await read();
-      const result = await action(db);
-      db.sessions = db.sessions.filter(s => s.expires > Date.now());
-      await mkdir(dataDir, {recursive: true, mode: 0o700});
-      const tmp = file + "." + randomUUID() + ".tmp";
-      await writeFile(tmp, JSON.stringify(db), {mode: 0o600, flag: "wx"});
-      await chmod(tmp, 0o600);
-      await rename(tmp, file);
-      return result;
+    const task=serial.then(async()=>{
+      const db=store.begin();
+      try {
+        const result=await action(db);
+        db.sessions=db.sessions.filter(s=>s.expires>Date.now());
+        store.commit(db);
+        return result;
+      }catch(error){store.rollback();throw error;}
     });
-    serial = task.catch(() => {});
+    serial=task.catch(()=>{});
     return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
@@ -185,6 +187,54 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         let user = null;
         try { user = auth(db, req); } catch {}
         json(res, 200, {user: user ? ownProfile(user) : null});
+        return true;
+      }
+      if (method === "GET" && path === "/account/export") {
+        const db=await read(), me=auth(db,req);
+        json(res,200,{
+          type:"tongpin_social_account_export",exportedAt:new Date().toISOString(),account:ownProfile(me),
+          connections:db.connections.filter(c=>c.from===me.id||c.to===me.id),
+          messages:db.messages.filter(m=>m.from===me.id||m.to===me.id),
+          reports:db.reports.filter(r=>r.from===me.id)
+        },{"Content-Disposition":'attachment; filename="tongpin-social-export.json"'});
+        return true;
+      }
+      if (method === "GET" && path === "/moderation/reports") {
+        verifyAdmin(req);
+        const db=await read();
+        json(res,200,{reports:db.reports.slice(-200).map(r=>({
+          ...r, reporter:db.users.find(u=>u.id===r.from)?.handle||"deleted",
+          subject:db.users.find(u=>u.id===r.target)?.handle||"deleted"
+        }))});
+        return true;
+      }
+      if (method === "PUT" && path.startsWith("/moderation/reports/")) {
+        verifyAdmin(req);
+        const input=await methodBody(req);
+        const status=await transaction(db=>{
+          const r=db.reports.find(x=>x.id===path.slice("/moderation/reports/".length));
+          if(!r)fail(404,"report_not_found");
+          if(!["dismiss","review","suspend"].includes(input.action))fail(400,"invalid_moderation_action");
+          r.reviewed=true;r.resolution=input.action;r.reviewedAt=new Date().toISOString();
+          if(input.action==="suspend"){
+            const u=byId(db,r.target);
+            u.suspendedUntil=new Date(Date.now()+7*86400000).toISOString();
+          }
+          return r.resolution;
+        });
+        json(res,200,{ok:true,resolution:status});
+        return true;
+      }
+      if (method === "DELETE" && path.startsWith("/connections/")) {
+        const id=path.split("/")[2];
+        await transaction(db=>{
+          const me=auth(db,req);
+          const relation=db.connections.find(c=>c.id===id&&(c.from===me.id||c.to===me.id));
+          if(!relation)fail(404,"relation_not_found");
+          db.connections=db.connections.filter(c=>c.id!==id);
+          return true;
+        });
+        json(res,200,{ok:true});
         return true;
       }
       if (method === "PUT" && path === "/me") {
@@ -343,6 +393,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       }
       fail(404, "endpoint_not_found");
     } catch (e) {
+      if (!e.status) console.error("[tongpin api]", e?.message || "unknown_error");
       if (!res.headersSent) json(res, e.status || 500, {error: e.status ? e.message : "internal_error"});
       return true;
     }

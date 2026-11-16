@@ -4,6 +4,12 @@ import {extname, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createSocialApi} from "./tongpin/api.mjs";
 
+if (process.env.NODE_ENV === "production") {
+  const origin=process.env.TONGPIN_PUBLIC_ORIGIN || "";
+  if (!origin.startsWith("https://") || !process.env.TONGPIN_ADMIN_TOKEN || process.env.TONGPIN_ADMIN_TOKEN.length < 32) {
+    throw Error("Production requires TONGPIN_PUBLIC_ORIGIN=https://... and a long TONGPIN_ADMIN_TOKEN");
+  }
+}
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "127.0.0.1";
@@ -43,7 +49,8 @@ createServer(async (request, response) => {
       "Cache-Control": relative.startsWith("tongpin/") ? "no-cache" : "no-store",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
-      "X-Frame-Options": "DENY"
+      "X-Frame-Options": "DENY",
+      ...(relative.startsWith("tongpin/") ? {"Content-Security-Policy":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"} : {})
     });
     response.end(request.method === "HEAD" ? undefined : body);
   } catch {
