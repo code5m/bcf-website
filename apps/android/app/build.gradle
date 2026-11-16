@@ -1,0 +1,29 @@
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace 'com.code5m.tongpin'
+  compileSdk 35
+  defaultConfig {
+    applicationId 'com.code5m.tongpin'
+    minSdk 26
+    targetSdk 35
+    versionCode 1
+    versionName '0.1.0'
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+dependencies {
+  implementation 'androidx.webkit:webkit:1.12.1'
+}
+
+tasks.register('syncTongpinWebAssets', Copy) {
+  from rootProject.file('../../tongpin')
+  include 'index.html','app.js','app.css','core.js','terms.html','icon.svg','sw.js','manifest.webmanifest'
+  into project.file('src/main/assets/tongpin')
+}
+tasks.named('preBuild').configure { dependsOn tasks.named('syncTongpinWebAssets') }
