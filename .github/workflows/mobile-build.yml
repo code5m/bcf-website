@@ -1,5 +1,7 @@
 name: Build Tongpin Android and iOS
 on:
+  pull_request:
+    paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
   workflow_dispatch:
 permissions:
   contents: read
