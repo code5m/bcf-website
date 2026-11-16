@@ -52,9 +52,9 @@ jobs:
             -derivedDataPath apps/ios/build CODE_SIGNING_ALLOWED=NO build
       - name: Archive simulator app
         run: |
-          test -d apps/ios/build/Build/Products/Debug-iphonesimulator/Tongpin.app
+          test -d apps/ios/build/Build/Products/Debug-iphonesimulator/同频.app
           ditto -c -k --sequesterRsrc --keepParent \
-            apps/ios/build/Build/Products/Debug-iphonesimulator/Tongpin.app \
+            apps/ios/build/Build/Products/Debug-iphonesimulator/同频.app \
             apps/ios/tongpin-ios-simulator.zip
       - uses: actions/upload-artifact@v4
         with:
