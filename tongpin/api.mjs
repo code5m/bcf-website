@@ -694,7 +694,19 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           if(peersBlocked(me,peer)||!connected(db,me.id,peer.id))fail(403,"friendship_required");
           const text=cleanText(input.text,1000);
           if(!text)fail(400,"message_required");
-          const msg={id:randomUUID(),from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
+          const supplied=String(input.clientMessageId||"");
+          if(supplied && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(supplied))
+            fail(400,"invalid_client_message_id");
+          const id=supplied||randomUUID();
+          // Client-generated UUID makes a retry idempotent after an ambiguous
+          // connection failure, but never permits forging another user's message.
+          const prior=store.db.prepare("SELECT payload FROM messages WHERE id=?").get(id);
+          if(prior){
+            const old=JSON.parse(prior.payload);
+            if(old.from!==me.id||old.to!==peer.id||old.text!==text)fail(409,"message_id_conflict");
+            return old;
+          }
+          const msg={id,from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
           store.appendMessage(msg);
           return msg;
         });
