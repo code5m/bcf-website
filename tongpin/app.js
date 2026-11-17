@@ -1,4 +1,4 @@
-import {bvidOf, cleanTopics, normalizeImported, MAX_SHOWCASE} from "./core.js";
+import {bvidOf, cleanTopics, normalizeImported, matchLocalFavorites, MAX_SHOWCASE} from "./core.js";
 
 const $ = id => document.getElementById(id);
 const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({
@@ -27,16 +27,21 @@ const errors = {
   invalid_or_duplicate_video:"橱窗包含重复或不合法 BV 视频。",
   session_changed:"密码已更新，请重新登录。"
 };
-function notify(text, isError = false) {
-  const box = $("notice");
-  box.textContent = String(text);
-  box.classList.toggle("error", isError);
-  box.hidden = false;
+let noticeTimer;
+function notify(text,isError=false){
+  const box=$("notice");
+  clearTimeout(noticeTimer);
+  box.textContent=String(text);
+  box.classList.toggle("error",isError);
+  box.hidden=false;
+  if(!isError)noticeTimer=setTimeout(()=>{box.hidden=true;},4500);
 }
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [], communityFeed: [], communityStatus:"loading",
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:"",topicVisible:{},communityLoadedAt:0,connectionsSnapshot:"",studySnapshot:""
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:"",topicVisible:{},communityLoadedAt:0,connectionsSnapshot:"",studySnapshot:"",
+  candidates:[],candidateCursor:null,candidatesLoaded:false,candidatesLoading:false,
+  candidateChecked:0,candidateError:false,matchMode:"overlap",pendingContact:null
 };
 let db;
 function openLocal() {
@@ -388,6 +393,13 @@ function renderLocal(){
   renderShowcase();
   if(state.tab==="learning")renderLearning();
   renderFeed();
+  if(state.tab==="discover" && $("discover-list"))renderPeople();
+  $("first-run-hero").hidden=state.items.length>0;
+  $("home-match-hint").hidden=state.items.length===0;
+  $("home-match-message").textContent=state.items.length+
+    " 条私人收藏在本机。看看有没有人公开分享过相同的视频。";
+  $("draft-indicator").hidden=state.showcase.length===0;
+  $("draft-indicator").textContent=state.showcase.length+" 条草稿";
 }
 function renderShowcase() {
   const items=state.showcase;
@@ -529,58 +541,153 @@ function renderAuthMode() {
   $("auth-submit").textContent=register?"创建账号":"登录";
   $("auth-form").elements.password.autocomplete=register?"new-password":"current-password";
 }
+function discoveryProfiles(){
+  const byId=new Map();
+  // Start with published public profiles, then overlay public-to-public match
+  // and relationship fields. Private BV IDs never leave this browser.
+  for(const person of state.candidates)byId.set(person.id,person);
+  for(const person of state.people)byId.set(person.id,{...byId.get(person.id),...person});
+  const ranked=matchLocalFavorites(state.items,[...byId.values()]
+    .filter(p=>p.id!==state.user?.id && !state.blocked.some(b=>b.id===p.id)));
+  return ranked.filter(p=>
+    state.matchMode==="overlap" ? p.localOverlap.count>0 :
+    (p.localOverlap.count>0 || (p.match?.score||0)>0 || p.relationship==="accepted" ||
+      // Anonymous visitors may browse real opt-in public profiles without logging in.
+      !state.user)
+  ).sort((a,b)=>b.localOverlap.count-a.localOverlap.count ||
+    (b.match?.sharedVideos?.length||0)-(a.match?.sharedVideos?.length||0) ||
+    (b.match?.score||0)-(a.match?.score||0) ||
+    String(a.handle).localeCompare(String(b.handle)));
+}
 function renderPeople(){
   const target=$("discover-list");
-  if(!state.user){
-    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">♡</div>'+
-      '<span class="overline">START WITH A REAL PROFILE</span>'+
-      '<h4>先介绍自己，再遇见喜欢同样内容的人。</h4>'+
-      '<p>不需要上传私人收藏。注册后选择想公开的几条视频、填写兴趣并开启被发现，真实的同好才会出现在这里。</p>'+
-      '<button class="button button-primary" data-action="login">登录 / 创建我的资料</button></div>';
+  const ranked=discoveryProfiles();
+  const sameCount=ranked.filter(p=>p.localOverlap.count>0).length;
+  const allPeople=matchLocalFavorites(state.items,
+    [...new Map([...state.candidates,...state.people].map(p=>[p.id,p])).values()]);
+  $("local-match-count").textContent=String(allPeople.filter(x=>x.localOverlap.count>0 && x.id!==state.user?.id).length);
+  for(const [id,mode] of [["match-filter-overlap","overlap"],["match-filter-all","all"]]){
+    const el=$(id);el.classList.toggle("selected",state.matchMode===mode);
+    el.setAttribute("aria-pressed",String(state.matchMode===mode));
+  }
+  $("match-more").hidden=!state.candidateCursor||state.candidatesLoading;
+  $("match-more").disabled=state.candidatesLoading;
+  $("match-status").textContent=state.candidatesLoading?
+    "正在查找主动公开的精选…" :
+    state.candidateError?"公开用户暂时无法加载，本机收藏没有发送出去。":
+    state.candidatesLoaded?"已检索 "+state.candidateChecked+" 位公开分享用户":"尚未开始查找";
+  const pending=$("pending-contact");
+  pending.hidden=!(state.user&&state.pendingContact);
+  if(!pending.hidden){
+    const person=state.candidates.find(x=>x.id===state.pendingContact.id) ||
+      state.people.find(x=>x.id===state.pendingContact.id);
+    pending.innerHTML='<div><strong>继续刚才的认识申请？</strong><p>你已登录。是否向 '+
+      escapeHtml(person?.displayName||person?.handle||"这位同好")+
+      ' 发出申请？只有对方接受后才能聊天。</p></div>'+
+      '<button class="button button-primary" data-action="request" data-id="'+
+      escapeHtml(state.pendingContact.id)+'">确认申请认识</button>'+
+      '<button class="button button-ghost" data-action="cancel-contact">取消</button>';
+  }
+  if(!ranked.length){
+    const loading=state.candidatesLoading;
+    const intro=state.items.length?
+      "你本地有 "+state.items.length+" 条收藏。只在设备上比较其他人自愿公开的 BV 视频，不会上传你的列表。":
+      "先从 BFC 导入私人收藏。没有收藏也能在「其他同好」查看主动公开的真实用户。";
+    target.innerHTML='<div class="meet-empty match-empty">'+
+      '<span class="meet-empty-symbol">♡</span><h4>'+
+      (loading?"正在寻找相同收藏…":
+        state.matchMode==="overlap"?"暂未发现相同收藏":"暂时没有符合条件的公开同好")+
+      '</h4><p>'+intro+(state.candidateCursor?" 还可以继续扫描更多公开用户。":"")+'</p>'+
+      (state.matchMode==="overlap"?
+        '<button class="button button-soft" data-action="match-all">看看其他同好</button>':
+        '<button class="button button-soft" data-action="showcase">我的公开精选</button>')+
+      '</div>';
     return;
   }
-  if(!state.people.length){
-    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">✧</div>'+
-      '<span class="overline">NO FAKE MATCHES</span><h4>这里暂时还没有合适的同好。</h4>'+
-      '<p>不会用机器人或虚构头像填满列表。试着主动公开几条有代表性的视频，并在「我的」资料里开启被发现。</p>'+
-      '<div class="card-actions"><button class="button button-primary" data-action="showcase">分享我的精选</button>'+
-      '<button class="button button-soft" data-action="login">完善个人资料</button></div></div>';
-    return;
-  }
-  target.innerHTML=state.people.map((u,index)=>{
+  target.innerHTML=ranked.slice(0,80).map((u,index)=>{
+    const overlap=u.localOverlap;
     const match=u.match||{sharedVideos:[],sharedTags:[],sharedTopics:[],score:0};
     const common=[...new Set([...(match.sharedTopics||[]),...(match.sharedTags||[])])];
-    const shared=(match.sharedVideos||[])[0];
-    const sharedTitle=shared?u.showcase?.find(video=>video.bvid===shared)?.title:"";
-    const reason=sharedTitle?"你们都分享过《"+sharedTitle+"》":
+    const overlapping=overlap.videos[0];
+    const sharedId=(match.sharedVideos||[])[0];
+    const shared=sharedId?u.showcase?.find(v=>v.bvid===sharedId):null;
+    const publicVideos=overlap.count ? overlap.videos : shared?[shared]:[];
+    const reason=overlap.count?
+      "你也收藏了《"+overlapping.title+"》":
+      shared?"你们都主动分享了《"+shared.title+"》":
       common.length?"你们都喜欢 "+common.slice(0,2).join("、"):
-      "喜欢的公开视频有交集";
-    const sharedVideos=(match.sharedVideos||[]).length;
-    const title=escapeHtml(u.displayName||u.handle||"用户");
-    const first=title.slice(0,1);
-    const primary=u.relationship==="accepted"?
-      '<button class="highlight" data-action="chat" data-id="'+u.id+'" data-name="'+title+'">♡ 去聊天 →</button>':
+      "TA 主动公开了自己的视频兴趣";
+    const title=escapeHtml(u.displayName||u.handle||"同好");
+    const contact=u.relationship==="accepted"?
+      '<button class="highlight" data-action="chat" data-id="'+u.id+'" data-name="'+title+'">进入聊天</button>':
       '<button class="highlight" data-action="request" data-id="'+u.id+'"'+
-      (u.relationship!=="none"?" disabled":"")+'>'+
-      (u.relationship==="none"?"♡ 申请认识":u.relationship==="accepted"?"已经是好友":"已发送申请")+'</button>';
-    return '<article class="person-card meet-card"><div class="meet-card-banner '+posterTheme(u.id)+'">'+
-      '<span class="meet-number">同好发现 / '+String(index+1).padStart(2,"0")+'</span>'+
-      '<span class="meet-quote">“'+escapeHtml(reason)+'”</span>'+
-      '<span class="meet-common">✦ '+sharedVideos+' 条共同分享的视频 · '+common.length+' 个共同话题</span></div>'+
-      '<div class="meet-card-body"><div class="person-header"><div class="avatar social-avatar">'+first+'</div>'+
-      '<div class="meet-identity"><h4>'+title+'</h4><span>@'+escapeHtml(u.handle)+
-      (u.city?' · '+escapeHtml(u.city):"")+'</span></div><span class="meet-heart" aria-hidden="true">♡</span></div>'+
-      '<p class="meet-bio">'+escapeHtml(u.bio||"很高兴在这里遇见喜欢相似视频的人。")+'</p>'+
-      '<div class="tags">'+tagsHtml(common)+'</div>'+
-      '<details class="public-picks"><summary>看看 TA 主动分享的视频</summary><ul>'+
-      (u.showcase||[]).slice(0,5).map(x=>'<li><a href="https://www.bilibili.com/video/'+
-        encodeURIComponent(x.bvid)+'" target="_blank" rel="noopener noreferrer">'+
-        escapeHtml(x.title)+'</a></li>').join("")+'</ul></details>'+
-      '<div class="card-actions meet-actions">'+primary+'</div>'+
-      '<details class="safety-options"><summary>更多 · 隐私与安全</summary>'+
+      (u.relationship==="pending"?" disabled":"")+'>'+
+      (u.relationship==="pending"?"已申请 · 等待回应":"申请认识")+'</button>';
+    const sharedBadge=overlap.count?
+      '<span class="local-match-badge">✓ 本机同收藏 '+overlap.count+' 条</span>':
+      (match.sharedVideos?.length?'<span class="public-match-badge">双方公开同好</span>':
+        '<span class="public-match-badge">公开兴趣</span>');
+    return '<article class="person-card meet-card" data-person-id="'+escapeHtml(u.id)+'">'+
+      '<div class="meet-card-banner '+posterTheme(u.id)+'">'+sharedBadge+
+      '<span class="meet-quote">'+escapeHtml(reason)+'</span>'+
+      '<small class="meet-common">'+
+      (overlap.count?"对方主动公开了该视频 · 仅你知道你收藏过":
+        (match.sharedVideos?.length||0)+" 条共同公开视频 · "+common.length+" 个公开话题")+
+      '</small></div><div class="meet-card-body">'+
+      '<div class="person-header"><div class="avatar social-avatar">'+
+      escapeHtml((u.displayName||u.handle||"?").slice(0,1))+
+      '</div><div class="meet-identity"><h4>'+title+'</h4><span>@'+
+      escapeHtml(u.handle||"")+(u.city?' · '+escapeHtml(u.city):"")+
+      '</span></div></div><p class="meet-bio">'+
+      escapeHtml(u.bio||"TA 分享了感兴趣的视频，可以从内容开始认识。")+
+      '</p><div class="tags">'+tagsHtml(common.length?common:(u.topics||[]).slice(0,4))+
+      '</div><details class="public-picks"><summary>查看 TA 主动公开的精选视频</summary><ul>'+
+      (u.showcase||[]).slice(0,8).map(v=>
+        '<li><a href="https://www.bilibili.com/video/'+encodeURIComponent(v.bvid)+
+        '" target="_blank" rel="noopener noreferrer">在 B站观看《'+escapeHtml(v.title)+'》 ↗</a></li>').join("")+
+      '</ul></details><div class="card-actions meet-actions">'+contact+'</div>'+
+      '<details class="safety-options"><summary>隐私与安全</summary>'+
       '<button data-action="report" data-id="'+u.id+'">举报</button>'+
-      '<button data-action="block" data-id="'+u.id+'">拉黑</button></details></div></article>';
+      '<button data-action="block" data-id="'+u.id+'">拉黑</button>'+
+      '</details></div></article>';
   }).join("");
+}
+let candidateRequest=null;
+async function loadCandidatePages({reset=false,pages=3}={}){
+  if(candidateRequest)return candidateRequest;
+  if(reset){
+    state.candidates=[];state.candidateCursor=null;state.candidatesLoaded=false;
+    state.candidateChecked=0;state.candidateError=false;
+  }
+  if(state.candidatesLoaded && !state.candidateCursor)return;
+  const epoch=state.sessionEpoch;
+  state.candidatesLoading=true;renderPeople();
+  const task=(async()=>{
+    try{
+      for(let i=0;i<pages;i++){
+        // Only a pagination cursor from PUBLIC profiles is ever transmitted.
+        // Neither private BV IDs nor locally computed intersections are sent.
+        const path="/candidates"+(state.candidateCursor?
+          "?after="+encodeURIComponent(state.candidateCursor):"");
+        const response=await api(path);
+        if(epoch!==state.sessionEpoch)return;
+        const seen=new Set(state.candidates.map(p=>p.id));
+        for(const p of response.people||[])if(!seen.has(p.id)){
+          state.candidates.push(p);seen.add(p.id);
+        }
+        state.candidateChecked+=response.people?.length||0;
+        state.candidateCursor=response.nextCursor||null;
+        state.candidatesLoaded=true;
+        if(!state.candidateCursor)break;
+      }
+      state.candidateError=false;
+    }catch(error){if(epoch===state.sessionEpoch)state.candidateError=true;}
+    finally{
+      if(epoch===state.sessionEpoch){state.candidatesLoading=false;renderPeople();}
+    }
+  })().finally(()=>{if(candidateRequest===task)candidateRequest=null;});
+  candidateRequest=task;
+  return task;
 }
 function renderConnections(){
   const connections=state.connections;
@@ -624,6 +731,9 @@ function clearSocialSession(){
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
   state.communityFeed=[];state.communityStatus="loading";state.communityLoadedAt=0;
+  state.candidates=[];state.candidateCursor=null;state.candidatesLoaded=false;
+  state.candidateChecked=0;state.candidatesLoading=false;state.candidateError=false;
+  state.pendingContact=null;state.matchMode="overlap";
   state.connectionsSnapshot="";state.studySnapshot="";
   if($("community-list"))renderCommunityFeed();
   state.messageCursor=null;
@@ -675,13 +785,17 @@ async function openChat(peer){
   await api("/messages/read","POST",{peerId:peer.id});
   await refreshNotifications();
 }
-async function refreshPeople() {
-  if(!state.user){state.people=[];renderPeople();return;}
-  const epoch=state.sessionEpoch,owner=state.user.id;
-  try {const people=(await api("/people")).people;
-    if(epoch===state.sessionEpoch&&state.user?.id===owner)state.people=people;
-  }catch(e){state.people=[];notify(e.message,true);}
-  renderPeople();
+async function refreshPeople(reset=false){
+  const epoch=state.sessionEpoch,owner=state.user?.id;
+  if(state.user){
+    try{
+      const people=(await api("/people")).people;
+      if(epoch===state.sessionEpoch && state.user?.id===owner)state.people=people;
+    }catch{if(!state.people.length)state.people=[];}
+  }else state.people=[];
+  if(epoch!==state.sessionEpoch)return;
+  await loadCandidatePages({reset:Boolean(reset),pages:3});
+  if(epoch===state.sessionEpoch)renderPeople();
 }
 async function refreshConnections(){
   if(!state.user){
