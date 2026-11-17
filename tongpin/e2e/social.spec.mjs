@@ -106,7 +106,7 @@ test("visitor can use private library without registering and sees no fabricated
   await page.goto("/tongpin/");
   await expect(page.locator("#stat-count")).toHaveText("0");
   await page.locator("[data-tab=discover]").click();
-  await expect(page.locator("#discover-list")).toContainText("登录后才能发现同频的人");
+  await expect(page.locator("#discover-list")).toContainText("先介绍自己，再遇见喜欢同样内容的人");
   const response=await page.request.get("/api/social/health");
   expect(response.status()).toBe(200);
   expect((await response.json()).externalBilibiliRequests).toBe(0);
@@ -133,7 +133,7 @@ test("BFC JSON imports topics, restores learning progress, and exports private b
   await page.locator("[data-tab=library]").click();
   const [download]=await Promise.all([
     page.waitForEvent("download"),
-    page.locator("#export-trigger").click()
+    page.locator(".manage-drawer summary").click().then(()=>page.locator("#export-trigger").click())
   ]);
   expect(download.suggestedFilename()).toContain("tongpin-private-backup-");
 });
@@ -177,6 +177,7 @@ test("two BFC imports preserve existing topic notes and offer atomic undo",async
   await expect(page.locator("#learning-list")).toContainText("第一段课程");
   await expect(page.locator("#learning-list")).toContainText("第二段课程");
   await page.locator("[data-tab=library]").click();
+  await page.locator(".manage-drawer summary").click();
   await page.locator("#undo-import").click();
   await expect(page.locator("#stat-count")).toHaveText("1");
   await expect(page.locator("#library-list")).not.toContainText("第二段课程");
@@ -203,7 +204,7 @@ test("switching social accounts does not retain the old account's visible profil
   await expect(page.locator("#unread-count")).toBeHidden();
   await make("b_"+Date.now().toString(36));
   await page.locator("[data-tab=friends]").click();
-  await expect(page.locator("#friends-list")).toContainText("还没有好友");
+  await expect(page.locator("#friends-list")).toContainText("还没有新的对话");
   await page.locator("[data-tab=learning]").click();
   await expect(page.locator("#study-plans")).toContainText("还没有共学计划");
 });
@@ -245,6 +246,7 @@ test("manual correction of placeholder title survives subsequent import",async({
   await page.locator('#library-list [data-action="edit"][data-id="BV1234567890"]').click();
   await page.locator('#add-form [name="title"]').fill("人工核实的真实标题");
   await page.locator("#add-form .button-primary").click();
+  await page.locator(".manage-drawer summary").click();
   const [download]=await Promise.all([page.waitForEvent("download"),page.locator("#export-trigger").click()]);
   const {readFile}=await import("node:fs/promises");
   const archive=JSON.parse(await readFile(await download.path(),"utf8"));
