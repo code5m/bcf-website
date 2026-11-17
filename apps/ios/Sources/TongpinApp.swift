@@ -164,8 +164,7 @@ struct PortableArchive: Codable {
             guard let id=Self.parseBV(source) else{continue}
             let old=byID[id]
             let incomingTitle=row["title"] as? String ?? rawVideo["title"] as? String ?? ""
-            let title=(!incomingTitle.isEmpty && !incomingTitle.hasPrefix("待补齐标题"))?
-                String(incomingTitle.prefix(150)):(old?.title ?? "待补齐标题 · "+id)
+            let title = (!incomingTitle.isEmpty && !incomingTitle.hasPrefix("待补齐标题")) ? String(incomingTitle.prefix(150)) : (old?.title ?? "待补齐标题 · "+id)
             let rawTags=row["tags"] as? [String] ?? []
             let topic=categories[id] ?? row["category"] as? String ?? ""
             let tags=Array(Set((old?.tags ?? [])+rawTags+(topic.isEmpty ? []:[topic])+(group[id] ?? [])))
@@ -219,7 +218,7 @@ struct PortableArchive: Codable {
                     sections:topic.sections.merging(old.sections){_,existing in existing})
             }else{names[topic.name]=topic}
         }
-        let all=Array(byID.values).sorted{$0.title.localizedCompare($1.title)==.orderedAscending}
+        let all=Array(byID.values).sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
         let allTopics=Array(names.values)
         let draft=drafts.isEmpty ? archive.showcaseDraft:drafts
         try persist(PortableArchive(videos:all,topics:allTopics,showcaseDraft:draft))
