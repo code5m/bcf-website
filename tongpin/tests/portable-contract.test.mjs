@@ -60,6 +60,6 @@ test("1200-video private round trip preserves notes, source folders, topics and 
     assert.equal(other.watched,original.watched);
     assert.deepEqual(other.topics,original.topics);
     assert.deepEqual(other.sourceFolders,original.sourceFolders);
-    assert.deepEqual(other.tags,original.tags);
+    assert.ok(original.tags.every(tag=>other.tags.includes(tag)),"original tags must survive topic enrichment");
   }
 });
