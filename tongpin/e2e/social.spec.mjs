@@ -226,6 +226,7 @@ test("delete after importing cannot resurrect a private note through import undo
   await expect(page.locator("#stat-count")).toHaveText("2");
   await page.locator('#library-list [data-action="remove"][data-id="BV1234567890"]').click();
   await expect(page.locator("#stat-count")).toHaveText("1");
+  await page.locator(".manage-drawer summary").click();
   await page.locator("#undo-import").click();
   await expect(page.locator("#stat-count")).toHaveText("1");
   await expect(page.locator("#library-list")).not.toContainText("秘密学习视频");
