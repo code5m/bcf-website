@@ -898,6 +898,15 @@ async function actionHandler(event) {
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
+    if(action==="match-all"){state.matchMode="all";renderPeople();return;}
+    if(action==="cancel-contact"){state.pendingContact=null;renderPeople();return;}
+    if(action==="request" && !state.user){
+      // Do not lose intent, but never auto-send a friend request on login.
+      state.pendingContact={id};
+      setTab("account");
+      notify("登录后可以继续向这位同好申请认识；不会自动发送申请。");
+      return;
+    }
     if(action==="topic-more"){
       const index=Number(button.dataset.index);
       if(!Number.isInteger(index)||index<0||index>=36)return;
@@ -968,10 +977,18 @@ async function actionHandler(event) {
       await refreshStudyPlans();
       notify(decision==="toggle"?"已更新你的共学进度。":"共学计划状态已更新。");
     }else if(action==="request"){
-      await api("/connections","POST",{targetId:id});
-      button.disabled=true;button.textContent="已发送申请";
-      notify("已发出申请；对方接受后才能聊天。");
-      await refreshPeople();
+      if(button.disabled)return;
+      button.disabled=true;
+      button.textContent="正在发送…";
+      try{
+        await api("/connections","POST",{targetId:id});
+        state.pendingContact=null;
+        for(const user of [...state.candidates,...state.people])
+          if(user.id===id)user.relationship="pending";
+        notify("申请已发出。对方同意后才可以聊天。");
+        renderPeople();
+        renderCommunityFeed();
+      }catch(error){button.disabled=false;button.textContent="申请认识";throw error;}
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
@@ -980,7 +997,12 @@ async function actionHandler(event) {
       $("chat-panel").scrollIntoView({behavior:"smooth",block:"nearest"});
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
-      await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
+      await api("/blocks","POST",{targetId:id});notify("已拉黑。");
+      state.chatPeer=null;renderChat();
+      state.candidates=state.candidates.filter(person=>person.id!==id);
+      state.communityFeed=state.communityFeed.filter(item=>item.curator?.id!==id);
+      renderCommunityFeed();
+      await refreshConnections();await refreshPeople(true);
     }else if(action==="unfriend"){
       if(!confirm("确认解除好友关系？"))return;
       await api("/connections/"+id,"DELETE",{});
@@ -996,6 +1018,16 @@ async function actionHandler(event) {
 }
 function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
+  $("library-sharing").onclick=()=>setTab("showcase");
+  $("shortcut-showcase").onclick=()=>setTab("showcase");
+  $("shortcut-learning").onclick=()=>setTab("learning");
+  $("friend-learning").onclick=()=>setTab("learning");
+  $("home-match-action").onclick=()=>{
+    state.matchMode="overlap";setTab("discover");
+  };
+  $("match-filter-overlap").onclick=()=>{state.matchMode="overlap";renderPeople();};
+  $("match-filter-all").onclick=()=>{state.matchMode="all";renderPeople();};
+  $("match-more").onclick=()=>loadCandidatePages({pages:3});
   $("login-shortcut").onclick=()=>setTab("account");
   for(const id of ["discover-from-hero"]){
     $(id).onclick=()=>setTab("discover");
@@ -1079,7 +1111,7 @@ function wire() {
     try{state.user=(await api("/showcase","PUT",{items:state.showcase})).user;renderAuth();renderLocal();notify("精选收藏已发布。公开资料的发现开关仍由你单独控制。");}
     catch(e){notify(e.message,true);}
   };
-  $("refresh-people").onclick=refreshPeople;
+  $("refresh-people").onclick=()=>refreshPeople(true);
   $("refresh-friends").onclick=refreshConnections;
   $("auth-mode-register").onclick=()=>{state.authMode="register";renderAuthMode();};
   $("auth-mode-login").onclick=()=>{state.authMode="login";renderAuthMode();};
@@ -1096,8 +1128,12 @@ function wire() {
     }
     try {
       const result=await api(state.authMode==="register"?"/register":"/login","POST",body);
-      clearSocialSession();state.user=result.user;
-      renderAuth();renderLocal();setTab("account");notify("账户已登录。你的私人收藏仍只留在浏览器。");
+      const pending=state.pendingContact;
+      clearSocialSession();state.user=result.user;state.pendingContact=pending;
+      renderAuth();renderLocal();
+      setTab(pending?"discover":"account");
+      notify(pending?"已登录，请确认是否发送刚才的认识申请。":
+        "账户已登录。私人收藏依然只在本机。");
       form.reset();
     }catch(e){notify(e.message,true);}
   };
