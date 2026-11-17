@@ -760,8 +760,12 @@ function renderChat(scrollMode="auto"){
   const nearBottom=prevHeight-prevTop-list.clientHeight<70;
   $("chat-heading").textContent="与 "+state.chatPeer.name+" 的对话";
   list.innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
-    '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
-    '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join(""):
+    '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+
+    (m.failed?" chat-failed":m.pending?" chat-pending":"")+'">'+escapeHtml(m.text)+
+    (m.failed?'<small>发送失败 <button data-action="retry-message" data-id="'+escapeHtml(m.id)+'">重试</button></small>':
+      m.pending?'<small>正在发送…</small>':
+      '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small>')+
+    '</div>').join(""):
     '<div class="chat-welcome">还没有消息，聊聊最近看到的好视频吧。</div>';
   $("load-older").hidden=!state.messageCursor;
   if(scrollMode==="prepend")list.scrollTop=prevTop+list.scrollHeight-prevHeight;
@@ -900,6 +904,20 @@ async function actionHandler(event) {
     if(action==="login"){setTab("account");return;}
     if(action==="match-all"){state.matchMode="all";renderPeople();return;}
     if(action==="cancel-contact"){state.pendingContact=null;renderPeople();return;}
+    if(action==="retry-message"){
+      const message=state.chatMessages.find(m=>m.id===id&&m.failed);
+      if(!message||!state.user||!state.chatPeer)return;
+      message.failed=false;message.pending=true;renderChat();
+      try{
+        const result=await api("/messages","POST",{
+          peerId:state.chatPeer.id,text:message.text,clientMessageId:message.id
+        });
+        const index=state.chatMessages.findIndex(m=>m.id===id);
+        if(index>=0)state.chatMessages[index]=result.message;
+      }catch(error){message.pending=false;message.failed=true;notify(error.message,true);}
+      renderChat();
+      return;
+    }
     if(action==="request" && !state.user){
       // Do not lose intent, but never auto-send a friend request on login.
       state.pendingContact={id};
@@ -1260,14 +1278,31 @@ function wire() {
   $("close-chat").onclick=()=>{state.chatPeer=null;state.chatMessages=[];state.messageCursor=null;renderChat();};
   $("chat-form").onsubmit=async event=>{
     event.preventDefault();
-    if(!state.chatPeer)return;
+    if(!state.chatPeer||!state.user)return;
     const text=$("chat-text").value.trim();
     if(!text)return;
-    try {
-      await api("/messages","POST",{peerId:state.chatPeer.id,text});
-      $("chat-text").value="";
-      await openChat(state.chatPeer);
-    }catch(e){notify(e.message,true);}
+    const peerId=state.chatPeer.id,ownerId=state.user.id;
+    const id=crypto.randomUUID();
+    const pending={id,from:ownerId,to:peerId,text,createdAt:new Date().toISOString(),pending:true};
+    state.chatMessages.push(pending);
+    $("chat-text").value="";
+    const send=$("chat-form").querySelector('button[type="submit"],button');
+    send.disabled=true;
+    renderChat("bottom");
+    try{
+      const response=await api("/messages","POST",{peerId,text,clientMessageId:id});
+      if(state.chatPeer?.id===peerId && state.user?.id===ownerId){
+        const index=state.chatMessages.findIndex(m=>m.id===id);
+        if(index>=0)state.chatMessages[index]=response.message;
+        renderChat("bottom");
+      }
+    }catch(error){
+      if(state.chatPeer?.id===peerId && state.user?.id===ownerId){
+        pending.pending=false;pending.failed=true;
+        renderChat("bottom");
+      }
+      notify(error.message,true);
+    }finally{send.disabled=false;}
   };
 }
 async function init() {
