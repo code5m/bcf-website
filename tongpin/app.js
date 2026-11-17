@@ -36,7 +36,7 @@ function notify(text, isError = false) {
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [], communityFeed: [], communityStatus:"loading",
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:""
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:"",topicVisible:{},communityLoadedAt:0,connectionsSnapshot:"",studySnapshot:""
 };
 let db;
 function openLocal() {
@@ -197,7 +197,9 @@ async function loadSession(){
 }
 function setTab(tab) {
   if(!["library","learning","showcase","discover","friends","account"].includes(tab))tab="library";
+  const changed=state.tab!==tab;
   state.tab=tab;
+  if(changed)window.scrollTo(0,0);
   document.querySelectorAll("[data-tab]").forEach(el=>{
     el.classList.toggle("active",el.dataset.tab===tab);
     el.setAttribute("aria-current",el.dataset.tab===tab?"page":"false");
@@ -233,8 +235,9 @@ function videoPoster(item,large=false){
     '<span class="poster-kicker">TONGPIN / CURATED</span>'+
     '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
     '<span class="poster-play" aria-hidden="true">▶</span>'+
-    '<span class="poster-bottom"><strong>'+escapeHtml(item.title)+'</strong>'+
-    '<small>打开 B站原视频 ↗</small></span></a>';
+    '<span class="poster-bottom">'+
+    (large?'<strong>'+escapeHtml(item.title)+'</strong>':'')+
+    '<small>在 B站观看 ↗</small></span></a>';
 }
 function cardHtml(item,place){
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
@@ -266,8 +269,8 @@ function renderFeed(){
     (tag?"# "+escapeHtml(tag):"全部视频")+'</button>').join("");
   const filtered=state.feedTag?state.items.filter(item=>(item.tags||[]).includes(state.feedTag)):state.items;
   $("feed-status").textContent=state.items.length?
-    "你的私人视频流 · "+filtered.length+" 条"+(state.feedTag?" · 话题 #"+state.feedTag:"")+" · 视频在 B站原站观看":
-    "先导入你真正喜欢的视频。这里不展示虚构影片，也不会自动公开私人收藏。";
+    filtered.length+" 条私人视频 · 在 B站观看"+(state.feedTag?" · #"+state.feedTag:""):
+    "导入私人片单，或看看大家公开分享的视频。";
   const item=filtered[0];
   if(!item){
     $("feed-feature").innerHTML='<div class="spotlight-empty"><span class="spotlight-spark" aria-hidden="true">▶</span>'+
@@ -335,7 +338,32 @@ async function refreshCommunityFeed(){
   }
   renderCommunityFeed();
 }
-function renderLocal() {
+let pendingLibraryFrame=0;
+// Search/pagination must not rebuild the entire page or 30k-item learning topics.
+function scheduleLibraryRender(){
+  if(pendingLibraryFrame)return;
+  pendingLibraryFrame=requestAnimationFrame(()=>{
+    pendingLibraryFrame=0;
+    renderLibraryList();
+  });
+}
+function renderLibraryList(){
+  const q=$("library-search").value.trim().toLowerCase();
+  const filterTag=$("library-tag").value;
+  const filtered=state.items.filter(i=>
+    (!filterTag||(i.tags||[]).includes(filterTag))&&
+    (!state.feedTag||(i.tags||[]).includes(state.feedTag))&&
+    (!q||[i.title,i.bvid,i.author,...(i.tags||[])].join(" ").toLowerCase().includes(q)));
+  const pages=Math.max(1,Math.ceil(filtered.length/24));
+  state.page=Math.max(1,Math.min(state.page,pages));
+  $("library-list").innerHTML=filtered.length?
+    filtered.slice((state.page-1)*24,state.page*24).map(i=>cardHtml(i,"library")).join(""):
+    empty("没有找到符合条件的视频","换个搜索词、清除标签，或添加新视频。");
+  $("library-page-label").textContent="第 "+state.page+" / "+pages+" 页 · "+filtered.length+" 条";
+  $("page-prev").disabled=state.page===1;
+  $("page-next").disabled=state.page>=pages;
+}
+function renderLocal(){
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
   $("stat-topics").textContent=new Set(state.items.flatMap(i=>i.tags||[])).size.toLocaleString("zh-CN");
   $("stat-shared").textContent=state.user?.showcase?.length||0;
@@ -344,21 +372,10 @@ function renderLocal() {
   const chosen=tagSelect.value;
   tagSelect.replaceChildren(new Option("全部标签",""),...tags.map(t=>new Option(t,t)));
   tagSelect.value=tags.includes(chosen)?chosen:"";
-  const q=$("library-search").value.trim().toLowerCase();
-  const filtered=state.items.filter(i=>(!tagSelect.value||(i.tags||[]).includes(tagSelect.value))&&
-    (!state.feedTag||(i.tags||[]).includes(state.feedTag))&&
-    (!q||[i.title,i.bvid,i.author,...(i.tags||[])].join(" ").toLowerCase().includes(q)));
-  const pages=Math.max(1,Math.ceil(filtered.length/24));
-  state.page=Math.min(state.page,pages);
-  $("library-list").innerHTML=filtered.length?filtered.slice((state.page-1)*24,state.page*24).map(i=>cardHtml(i,"library")).join("")
-    :empty("还没有符合条件的收藏","手动添加 BV 号，或导入已有 BFC JSON 备份。");
-  $("library-page-label").textContent="第 "+state.page+" / "+pages+" 页 · "+filtered.length+" 条";
-  $("page-prev").disabled=state.page===1;
-  $("page-next").disabled=state.page>=pages;
+  renderLibraryList();
   renderShowcase();
-  renderLearning();
+  if(state.tab==="learning")renderLearning();
   renderFeed();
-  renderCommunityFeed();
 }
 function renderShowcase() {
   const items=state.showcase;
@@ -704,6 +721,13 @@ async function actionHandler(event) {
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
+    if(action==="topic-more"){
+      const index=Number(button.dataset.index);
+      if(!Number.isInteger(index)||index<0||index>=36)return;
+      state.topicVisible[index]=Math.min(30000,(state.topicVisible[index]||12)+24);
+      renderLearning();
+      return;
+    }
     if(action==="toggle")return await updateShowcaseDraft(id);
     if(action==="watched"){
       const item=state.items.find(x=>x.bvid===id);
@@ -796,7 +820,7 @@ async function actionHandler(event) {
 function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
-  for(const id of ["discover-from-hero","feed-meet-cta","feed-connection-cta"]){
+  for(const id of ["discover-from-hero"]){
     $(id).onclick=()=>setTab("discover");
   }
   $("meet-profile-cta").onclick=()=>setTab("account");
@@ -807,7 +831,8 @@ function wire() {
     if(!button)return;
     state.feedTag=button.dataset.feedTag;
     state.page=1;
-    renderLocal();
+    renderFeed();
+    scheduleLibraryRender();
   });
   document.querySelectorAll("button[data-chat-prompt]").forEach(button=>{
     button.onclick=()=>{
@@ -849,10 +874,10 @@ function wire() {
     try{const file=e.target.files[0];if(file)await importFile(file);}catch(err){notify(err.message,true);}
     e.target.value="";
   };
-  $("library-search").oninput=()=>{state.page=1;renderLocal();};
-  $("library-tag").onchange=()=>{state.page=1;renderLocal();};
-  $("page-prev").onclick=()=>{state.page--;renderLocal();};
-  $("page-next").onclick=()=>{state.page++;renderLocal();};
+  $("library-search").oninput=()=>{state.page=1;scheduleLibraryRender();};
+  $("library-tag").onchange=()=>{state.page=1;renderLibraryList();};
+  $("page-prev").onclick=()=>{state.page=Math.max(1,state.page-1);renderLibraryList();};
+  $("page-next").onclick=()=>{state.page++;renderLibraryList();};
   $("add-trigger").onclick=()=>{$("add-form").reset();$("add-dialog").showModal();};
   $("cancel-add").onclick=()=>$("add-dialog").close();
   $("add-form").onsubmit=async e=>{
