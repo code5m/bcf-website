@@ -36,7 +36,7 @@ function notify(text, isError = false) {
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[]
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null
 };
 let db;
 function openLocal() {
@@ -210,6 +210,7 @@ function setTab(tab) {
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
   if(tab==="showcase")renderShowcase();
+  if(tab==="account")refreshAppeals();
 }
 function tagsHtml(tags) {
   return (tags||[]).slice(0,8).map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join("");
@@ -340,6 +341,14 @@ function renderAuth() {
     form.elements.discoverable.checked=Boolean(state.user.discoverable);
   }
 }
+async function refreshAppeals(){
+  if(!state.user)return;
+  try{
+    const result=await api("/appeals");
+    $("appeal-history").textContent=result.appeals.map(a=>
+      a.createdAt+" · "+a.status+" · "+(a.resolution||"尚无审核结论")).join("\n")||"暂无申诉";
+  }catch{$("appeal-history").textContent="申诉暂时无法读取";}
+}
 function renderAuthMode() {
   const register=state.authMode==="register";
   $("auth-mode-register").classList.toggle("active",register);
@@ -387,6 +396,10 @@ function clearSocialSession(){
   state.user=null;state.people=[];state.connections=[];state.blocked=[];
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
+  state.messageCursor=null;
+  if($("unread-count"))$("unread-count").hidden=true;
+  if($("load-older"))$("load-older").hidden=true;
+  if($("recovery-codes-output"))$("recovery-codes-output").textContent="";
   if($("chat-panel")){renderChat();}
   if($("discover-list"))renderPeople();
   if($("friends-list"))renderConnections();
@@ -399,7 +412,32 @@ function renderChat() {
   $("chat-list").innerHTML=state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
     '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join("");
+  $("load-older").hidden=!state.messageCursor;
   $("chat-list").scrollTop=$("chat-list").scrollHeight;
+}
+
+async function refreshNotifications(){
+  if(!state.user){state.unread=0;$("unread-count").hidden=true;return;}
+  const epoch=state.sessionEpoch,owner=state.user.id;
+  try{
+    const result=await api("/notifications");
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    state.unread=result.total||0;
+    const badge=$("unread-count");
+    badge.hidden=!state.unread;
+    badge.textContent=state.unread>99?"99+":String(state.unread);
+  }catch{}
+}
+async function openChat(peer){
+  state.chatPeer=peer;
+  const owner=state.user?.id,epoch=state.sessionEpoch;
+  const result=await api("/messages?peer="+encodeURIComponent(peer.id));
+  if(owner!==state.user?.id||epoch!==state.sessionEpoch)return;
+  state.chatMessages=result.messages;
+  state.messageCursor=result.nextCursor||null;
+  renderChat();
+  await api("/messages/read","POST",{peerId:peer.id});
+  await refreshNotifications();
 }
 async function refreshPeople() {
   if(!state.user){state.people=[];renderPeople();return;}
@@ -533,9 +571,7 @@ async function actionHandler(event) {
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
-      state.chatPeer={id,name:button.dataset.name};
-      state.chatMessages=(await api("/messages?peer="+encodeURIComponent(id))).messages;
-      renderChat();
+      await openChat({id,name:button.dataset.name});
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
       await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
@@ -659,6 +695,36 @@ function wire() {
       notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");
     }catch(e){notify(e.message,true);}
   };
+  $("recovery-codes-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      const response=await api("/account/recovery-codes","POST",{password:fields.get("password")});
+      $("recovery-codes-output").textContent=response.codes.join("\n");
+      event.currentTarget.reset();
+      notify("已生成8个一次性恢复码。请立即在安全位置保存，之后无法再次查看明文。");
+    }catch(error){notify(error.message,true);}
+  };
+  $("recover-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/account/recover","POST",{handle:fields.get("handle"),code:fields.get("code"),
+        newPassword:fields.get("newPassword")});
+      event.currentTarget.reset();
+      notify("密码已重置，所有既有会话已失效。请重新登录。");
+    }catch(error){notify(error.message,true);}
+  };
+  $("appeal-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/appeals","POST",{details:fields.get("details")});
+      event.currentTarget.reset();
+      notify("已提交申诉，等待人工审核。");
+      await refreshAppeals();
+    }catch(error){notify(error.message,true);}
+  };
   $("password-form").onsubmit=async event=>{
     event.preventDefault();
     const form=event.currentTarget,values=new FormData(form);
@@ -711,7 +777,18 @@ function wire() {
       notify("举报已提交审核。你也可以直接拉黑对方。");
     }catch(e){notify(e.message,true);}
   };
-  $("close-chat").onclick=()=>{state.chatPeer=null;renderChat();};
+  $("load-older").onclick=async()=>{
+    if(!state.chatPeer||!state.messageCursor)return;
+    try{
+      const result=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id)+
+        "&before="+encodeURIComponent(state.messageCursor));
+      const seen=new Set(state.chatMessages.map(m=>m.id));
+      state.chatMessages=[...result.messages.filter(m=>!seen.has(m.id)),...state.chatMessages];
+      state.messageCursor=result.nextCursor||null;
+      renderChat();
+    }catch(error){notify(error.message,true);}
+  };
+  $("close-chat").onclick=()=>{state.chatPeer=null;state.chatMessages=[];state.messageCursor=null;renderChat();};
   $("chat-form").onsubmit=async event=>{
     event.preventDefault();
     if(!state.chatPeer)return;
@@ -720,8 +797,7 @@ function wire() {
     try {
       await api("/messages","POST",{peerId:state.chatPeer.id,text});
       $("chat-text").value="";
-      state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;
-      renderChat();
+      await openChat(state.chatPeer);
     }catch(e){notify(e.message,true);}
   };
 }
@@ -731,14 +807,21 @@ async function init() {
   try {db=await openLocal();await refreshLocal();}
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
+  await refreshNotifications();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
     if(!state.user || document.visibilityState!=="visible")return;
     if(state.tab==="learning")await refreshStudyPlans();
+    await refreshNotifications();
     if(state.tab==="friends"){
       await refreshConnections();
       if(state.chatPeer){
-        try{state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;renderChat();}
+        try{
+          const response=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id));
+          const seen=new Set(state.chatMessages.map(m=>m.id));
+          state.chatMessages=[...state.chatMessages,...response.messages.filter(m=>!seen.has(m.id))];
+          renderChat();
+        }
         catch{/* Friendship may have been revoked: next user action displays the error. */}
       }
     }
