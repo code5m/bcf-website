@@ -3,7 +3,7 @@ import {readFile} from "node:fs/promises";
 import {extname, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createSocialApi} from "./tongpin/api.mjs";
-import {localBfcImport} from "./tongpin/local-bridge.mjs";
+import {localBfcImport,ownerBfcApi} from "./tongpin/local-bridge.mjs";
 
 if (process.env.NODE_ENV === "production") {
   const origin=process.env.TONGPIN_PUBLIC_ORIGIN || "";
@@ -44,6 +44,7 @@ const app=createServer(async(req,res)=>{
   catch{res.writeHead(400);res.end("Bad request");return;}
   try{
     if(url.pathname.startsWith("/api/social/")) {await social(req,res,url);return;}
+    if(await ownerBfcApi(req,res,url))return;
     if(url.pathname.startsWith("/api/local/")) {
       if(!await localBfcImport(req,res,url)){
         res.writeHead(404);res.end("Not found");
@@ -53,7 +54,8 @@ const app=createServer(async(req,res)=>{
     if(req.method!=="GET"&&req.method!=="HEAD"){
       res.writeHead(405,{"Allow":"GET, HEAD"});res.end();return;
     }
-    const relative=url.pathname==="/"||url.pathname==="/index.html"?"studio.html":
+    const relative=url.pathname==="/"||url.pathname==="/index.html" ?
+      (process.env.NODE_ENV==="production"?"tongpin/index.html":"studio.html") :
       url.pathname==="/manage"?"index.html":
       url.pathname==="/tongpin"||url.pathname==="/tongpin/"?"tongpin/index.html":
       url.pathname.replace(/^\/+/,"");

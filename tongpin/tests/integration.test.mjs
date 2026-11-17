@@ -22,6 +22,12 @@ test("server blocks source/config and imports BFC only with explicit local owner
     if(req.headers.host!==host){res.writeHead(403).end();return;}
     res.setHeader("Content-Type","application/json");
     if(req.url==="/api/session"){res.end(JSON.stringify({token:"f".repeat(64)}));return;}
+    if(req.url==="/api/workbench/state" && req.headers["x-local-csrf"]==="f".repeat(64)){
+      const state={videos:{"BV1234567890":{bvid:"BV1234567890",title:"私人电影"}},library:{topics:[],categories:{}}};
+      res.end(JSON.stringify(req.method==="PUT"?{ok:true,summary:{revision:2}}:
+        {ok:true,summary:{revision:1},state}));
+      return;
+    }
     if(req.url==="/api/workbench/backup"&&req.headers["x-local-csrf"]==="f".repeat(64)){
       backupRequests++;
       res.end(JSON.stringify({type:"workbench_backup",version:1,
@@ -65,6 +71,24 @@ test("server blocks source/config and imports BFC only with explicit local owner
     assert.equal(imported.state.videos.BV1234567890.title,"私人电影");
     assert.equal(backupRequests,1);
     assert.equal(response.headers.get("cache-control"),"no-store");
+    const unauthorized=await fetch(base+"/api/workbench/state");
+    assert.equal(unauthorized.status,403);
+    const ownerSession=await fetch(base+"/api/session",{headers:{"X-Tongpin-Local":"1"}});
+    assert.equal(ownerSession.status,200);
+    const token=(await ownerSession.json()).token;
+    const dataResponse=await fetch(base+"/api/workbench/state",{headers:{
+      "X-Tongpin-Local":"1","X-Local-CSRF":token
+    }});
+    assert.equal(dataResponse.status,200);
+    assert.equal((await dataResponse.json()).state.videos.BV1234567890.title,"私人电影");
+    const wrong=await fetch(base+"/api/workbench/state",{method:"PUT",
+      headers:{"Origin":"https://evil.example","X-Tongpin-Local":"1","X-Local-CSRF":token,"Content-Type":"application/json"},
+      body:JSON.stringify({library:{}})});
+    assert.equal(wrong.status,403);
+    const saved=await fetch(base+"/api/workbench/state",{method:"PUT",
+      headers:{"Origin":base,"X-Tongpin-Local":"1","X-Local-CSRF":token,"Content-Type":"application/json"},
+      body:JSON.stringify({expectedRevision:1,library:{topics:[]}})});
+    assert.equal(saved.status,200);
   }finally{
     child.kill("SIGTERM");
     await new Promise(done=>child.once("exit",done));

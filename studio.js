@@ -6,7 +6,7 @@ let state;try{state=JSON.parse(localStorage.getItem(key))||{topics:[],categories
 const save=()=>{localStorage.setItem(key,JSON.stringify(state));if(sessionToken){clearTimeout(syncTimer);syncTimer=setTimeout(syncServer,250);}};
 async function syncServer(){
  try{
-  const response=await fetch('/api/workbench/state',{method:'PUT',headers:{'Content-Type':'application/json','Origin':location.origin,'X-Local-CSRF':sessionToken},body:JSON.stringify({expectedRevision:serverRevision,library:state})});
+  const response=await fetch('/api/workbench/state',{method:'PUT',headers:{'Content-Type':'application/json','Origin':location.origin,'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'},body:JSON.stringify({expectedRevision:serverRevision,library:state})});
   if(!response.ok)throw Error('服务端保存失败');
   serverRevision=(await response.clone().json()).summary.revision;
   $('message').dataset.server='已同步服务端';
@@ -100,7 +100,7 @@ $('new-topic').onclick=()=>edit();$('edit-topic').onclick=()=>edit(state.topics.
 $('back').onclick=()=>location.hash='topics';$('find-videos').onclick=()=>{location.hash='library';};for(const id of ['search','filter','confidence'])$(id).oninput=()=>{page=1;library();};$('prev').onclick=()=>{page--;library();};$('next').onclick=()=>{page++;library();};$('select-page').onchange=e=>{for(const c of $('videos').querySelectorAll('input[type=checkbox]')){c.checked=e.target.checked;c.dispatchEvent(new Event('change'));}};
 $('add-selected').onclick=()=>{const t=state.topics.find(t=>t.id===$('assign-topic').value);if(!t){edit();return;}const before=t.items.length;if(selected.size)t.customized=true;addToTopic(t,[...selected]);save();$('message').textContent=`已将 ${t.items.length-before} 条新视频加入「${t.name}」，重复项自动跳过`;selected.clear();library();};$('recategorize').onclick=()=>{const c=$('assign-category').value;for(const id of selected)state.categories[id]=c;refreshCategoryTopics(state,rows);save();$('message').textContent=`已修改 ${selected.size} 条视频分类`;selected.clear();menus();library();};
 $('export').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'})),a=el('a','');a.href=u;a.download='my-video-library.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);};
-$('logout').onclick=async()=>{if(!sessionToken)return;const response=await fetch('/api/session/logout',{method:'POST',headers:{'X-Local-CSRF':sessionToken}});if(response.ok){sessionToken=null;$('message').textContent='已退出当前会话，专题数据仍保留。';}};
+$('logout').onclick=async()=>{if(!sessionToken)return;const response=await fetch('/api/session/logout',{method:'POST',headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1','Origin':location.origin,'Content-Type':'application/json'},body:'{}'});if(response.ok){sessionToken=null;$('message').textContent='已退出当前会话，专题数据仍保留。';}};
 $('import').onchange=async e=>{
  if(!e.target.files.length)return;
  try{
@@ -110,7 +110,7 @@ $('import').onchange=async e=>{
  }catch(err){$('message').textContent=err.message;}
 };
 addEventListener('hashchange',navigate);
-fetch('/api/session').then(r=>r.json()).then(session=>{sessionToken=session.token;return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken}})}).then(r=>{
+fetch('/api/session',{headers:{'X-Tongpin-Local':'1'}}).then(r=>{if(!r.ok)throw Error('原 BFC 未连接');return r.json();}).then(session=>{sessionToken=session.token;return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}})}).then(r=>{
  if(!r.ok)throw Error('服务端视频库暂不可用');
  return r.json();
 }).then(x=>{
