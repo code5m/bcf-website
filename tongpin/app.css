@@ -386,3 +386,10 @@ a{color:#b7f5e5}
 .community-cta button:hover{background:#ab7893;color:#140f17}
 .community-cta button:disabled{opacity:.6}
 @media(max-width:650px){.share-next{flex-wrap:wrap}.share-next>div{min-width:70%}.share-next>button{width:100%}.community-cta button{font-size:11px;padding:8px}}
+
+/* The consumer desktop grid is declared after the original mobile breakpoints.
+   Reset it explicitly on phones/tablets so content never starts behind a phantom 234px sidebar. */
+@media(max-width:860px){
+  .app-shell{grid-template-columns:minmax(0,1fr)}
+  .main-area{min-width:0;width:100%;max-width:100%}
+}
