@@ -1,5 +1,15 @@
 name: Build Tongpin Android and iOS
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'scripts/**'
+      - 'apps/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.github/workflows/**'
   pull_request:
     paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
   workflow_dispatch:

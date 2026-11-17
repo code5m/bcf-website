@@ -1,9 +1,20 @@
 name: Tongpin MVP Verification
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'scripts/**'
+      - 'apps/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'tongpin/**'
       - 'server.mjs'
+      - 'scripts/**'
       - 'package.json'
       - '.github/workflows/tongpin-ci.yml'
   workflow_dispatch:
