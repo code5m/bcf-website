@@ -486,7 +486,7 @@ async function persistVideo(input) {
   if(!title)throw new Error("请填写视频标题");
   const previous=state.items.find(x=>x.bvid===bvid);
   await txPutMany("videos",[{
-    ...previous,bvid,title,author:previous?.author||"",
+    ...previous,bvid,title,metadataMissing:false,author:previous?.author||"",
     tags:cleanTopics(input.tags,12),notes:String(input.notes||"").slice(0,4000),
     sourceFolders:previous?.sourceFolders||[],url:"https://www.bilibili.com/video/"+bvid,
     updatedAt:new Date().toISOString()
@@ -563,6 +563,9 @@ async function actionHandler(event) {
           sections:Object.fromEntries(Object.entries(topic.sections||{}).filter(([bvid])=>bvid!==id))
         }));
         settings.put({key:"topics",value:topics});
+        // A deliberate user deletion wins over any older import-undo snapshot.
+        // Otherwise "undo" could silently resurrect records and private notes.
+        settings.delete("lastImportUndo");
         tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
       });
       await refreshLocal();
@@ -717,7 +720,14 @@ function wire() {
     try{
       const response=await fetch("/api/social/account/export",{credentials:"same-origin",cache:"no-store"});
       if(!response.ok)throw Error("账户数据导出失败："+response.status);
-      const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");
+      const content=await response.text();
+      if(window.TongpinNative?.postMessage){
+        window.TongpinNative.postMessage(JSON.stringify({type:"export-social",content}));
+        notify("请选择 Android 设备中的保存位置；备份包含私人消息，请谨慎存放。");
+        return;
+      }
+      const blob=new Blob([content],{type:"application/json"});
+      const url=URL.createObjectURL(blob),a=document.createElement("a");
       a.href=url;a.download="tongpin-social-account-"+new Date().toISOString().slice(0,10)+".json";
       a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
       notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");

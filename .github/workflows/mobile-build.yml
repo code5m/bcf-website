@@ -61,6 +61,10 @@ jobs:
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath apps/ios/build CODE_SIGNING_ALLOWED=NO build
+      - name: Verify portable Swift / Web JSON v3 contract
+        run: |
+          swiftc -o /tmp/tongpin-portable-contract apps/ios/Sources/PortableArchiveModels.swift apps/ios/Tests/main.swift
+          /tmp/tongpin-portable-contract tongpin/tests/fixtures/private-v3.json
       - name: Archive simulator app
         run: |
           test -d apps/ios/build/Build/Products/Debug-iphonesimulator/同频.app

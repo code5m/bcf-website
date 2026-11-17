@@ -151,7 +151,21 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
     const method = req.method;
     try {
       if (method !== "GET") writeAllowed(req);
-      if (method === "GET" && path === "/health") return json(res, 200, {ok: true, storage: "server-local", externalBilibiliRequests: 0}), true;
+      if (method === "GET" && path === "/health") {
+        try{
+          // Only local container probes write SQLite. Public GET requests cannot
+          // be turned into a repeated write-amplification attack.
+          const remote=String(req.socket.remoteAddress||"");
+          const local=/^(127\.|::1$|::ffff:127\.)/.test(remote);
+          if(local)store.health();
+          else store.db.prepare("SELECT 1 FROM schema_meta LIMIT 1").get();
+          json(res,200,{ok:true,storage:local?"sqlite-writable":"sqlite-readable",externalBilibiliRequests:0});
+        }catch(error){
+          console.error("[tongpin health]",error?.message||"storage_failure");
+          json(res,503,{ok:false,error:"storage_unavailable"});
+        }
+        return true;
+      }
       if (method === "POST" && path === "/register") {
         limit(req, "auth", 10, 600000);
         const input = await methodBody(req);
@@ -187,12 +201,17 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         if (!user || !passwordValid(String(input.password || ""), user.passwordHash)) fail(401, "invalid_credentials");
         if (user.suspendedUntil && new Date(user.suspendedUntil).getTime() > Date.now()) fail(403, "account_suspended");
         const token = randomBytes(32).toString("hex");
-        await transaction(fresh => {
-          if (!fresh.users.some(u => u.id === user.id)) fail(401, "invalid_credentials");
-          fresh.sessions.push({key: sha(token), userId: user.id, expires: Date.now() + SESSION_AGE});
-          return true;
+        const authenticated=await transaction(fresh => {
+          const current=fresh.users.find(u=>u.id===user.id);
+          // Prevent an already-verified old password from creating a session after
+          // a concurrent password change or a new suspension.
+          if(!current||current.passwordHash!==user.passwordHash)fail(401,"invalid_credentials");
+          if(current.suspendedUntil && new Date(current.suspendedUntil).getTime()>Date.now())
+            fail(403,"account_suspended");
+          fresh.sessions.push({key: sha(token), userId: current.id, expires: Date.now() + SESSION_AGE});
+          return ownProfile(current);
         });
-        json(res, 200, {user: ownProfile(user)}, {"Set-Cookie": setCookie(req, token)});
+        json(res, 200, {user: authenticated}, {"Set-Cookie": setCookie(req, token)});
         return true;
       }
       if (method === "POST" && path === "/logout") {
@@ -660,7 +679,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           db.users = db.users.filter(u => u.id !== me.id);
           db.sessions = db.sessions.filter(s => s.userId !== me.id);
           db.connections = db.connections.filter(c => c.from !== me.id && c.to !== me.id);
-          db.messages = db.messages.filter(m => m.from !== me.id && m.to !== me.id);
+          store.deleteMessagesForUser(me.id);
           db.studyPlans=(db.studyPlans||[]).filter(p=>p.creatorId!==me.id&&p.partnerId!==me.id);
           db.readStates=(db.readStates||[]).filter(s=>s.userId!==me.id&&s.peerId!==me.id);
           db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==me.id);

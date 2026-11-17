@@ -2,77 +2,6 @@ import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
 
-struct SavedVideo: Codable, Identifiable, Hashable {
-    let bvid: String
-    var title: String
-    var tags: [String]
-    var notes: String
-    var author: String
-    var topics: [String]
-    var sourceFolders: [String]
-    var watched: Bool
-    var progress: Double?
-    var metadataMissing: Bool
-    var id: String { bvid }
-
-    init(bvid: String, title: String, tags: [String], notes: String,
-         author: String = "", topics: [String] = [], sourceFolders: [String] = [],
-         watched: Bool = false, progress: Double? = nil, metadataMissing: Bool = false) {
-        self.bvid=bvid;self.title=title;self.tags=tags;self.notes=notes
-        self.author=author;self.topics=topics;self.sourceFolders=sourceFolders
-        self.watched=watched;self.progress=progress;self.metadataMissing=metadataMissing
-    }
-    init(from decoder:Decoder) throws {
-        let c=try decoder.container(keyedBy:CodingKeys.self)
-        bvid=try c.decode(String.self,forKey:.bvid)
-        title=try c.decodeIfPresent(String.self,forKey:.title) ?? "待补齐标题 · "+bvid
-        tags=try c.decodeIfPresent([String].self,forKey:.tags) ?? []
-        notes=try c.decodeIfPresent(String.self,forKey:.notes) ?? ""
-        author=try c.decodeIfPresent(String.self,forKey:.author) ?? ""
-        topics=try c.decodeIfPresent([String].self,forKey:.topics) ?? []
-        sourceFolders=try c.decodeIfPresent([String].self,forKey:.sourceFolders) ?? []
-        watched=try c.decodeIfPresent(Bool.self,forKey:.watched) ?? false
-        progress=try c.decodeIfPresent(Double.self,forKey:.progress)
-        metadataMissing=try c.decodeIfPresent(Bool.self,forKey:.metadataMissing) ?? false
-    }
-}
-struct PortableTopic: Codable {
-    var name: String
-    var description: String
-    var notes: String
-    var chapters: [String]
-    var items: [String]
-    var sections: [String:String]
-    init(name:String,description:String="",notes:String="",chapters:[String]=[],
-         items:[String]=[],sections:[String:String]=[:]) {
-        self.name=name;self.description=description;self.notes=notes
-        self.chapters=chapters;self.items=items;self.sections=sections
-    }
-    init(from decoder:Decoder) throws {
-        let c=try decoder.container(keyedBy:CodingKeys.self)
-        name=try c.decode(String.self,forKey:.name)
-        description=try c.decodeIfPresent(String.self,forKey:.description) ?? ""
-        notes=try c.decodeIfPresent(String.self,forKey:.notes) ?? ""
-        chapters=try c.decodeIfPresent([String].self,forKey:.chapters) ?? []
-        items=try c.decodeIfPresent([String].self,forKey:.items) ?? []
-        sections=try c.decodeIfPresent([String:String].self,forKey:.sections) ?? [:]
-    }
-}
-struct CuratedVideo: Codable {
-    var bvid:String
-    var title:String
-    var tags:[String]
-    var caption:String
-    var url:String
-}
-struct PortableArchive: Codable {
-    var type: String = "tongpin_private_library"
-    var version: Int = 3
-    var videos: [SavedVideo]
-    var topics: [PortableTopic] = []
-    var showcaseDraft: [CuratedVideo] = []
-}
-
 @MainActor final class PrivateLibrary: ObservableObject {
     @Published private(set) var videos: [SavedVideo] = []
     @Published private(set) var topics: [PortableTopic] = []
@@ -96,10 +25,17 @@ struct PortableArchive: Codable {
         try data.write(to:dataURL,options:[.atomic,.completeFileProtectionUnlessOpen])
     }
     func save(_ item:SavedVideo) throws {
+        let existing=videos.first{$0.bvid==item.bvid}
+        let tags=Array(Set((existing?.tags ?? [])+item.tags)).sorted()
         let cleaned=SavedVideo(bvid:item.bvid,title:String(item.title.prefix(150)),
-            tags:Array(item.tags.prefix(12)),notes:String(item.notes.prefix(4000)),
-            author:item.author,topics:item.topics,sourceFolders:item.sourceFolders,
-            watched:item.watched,progress:item.progress,metadataMissing:item.metadataMissing)
+            tags:Array(tags.prefix(12)),
+            notes:String((item.notes.isEmpty ? (existing?.notes ?? "") : item.notes).prefix(4000)),
+            author:existing?.author ?? item.author,
+            topics:existing?.topics ?? item.topics,
+            sourceFolders:existing?.sourceFolders ?? item.sourceFolders,
+            watched:existing?.watched ?? item.watched,
+            progress:existing?.progress ?? item.progress,
+            metadataMissing:false)
         var next=videos.filter{$0.bvid != item.bvid}
         next.insert(cleaned,at:0)
         try persist(PortableArchive(videos:next,topics:topics,showcaseDraft:drafts))
@@ -162,7 +98,8 @@ struct PortableArchive: Codable {
             newTopics.append(item)
             for id in items{group[id,default:[]].append(name)}
         }
-        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        var byID:[String:SavedVideo]=[:]
+        for item in videos {byID[item.bvid]=item}
         let additional=Set(group.keys).union(categories.keys).union(notes.keys).union(watched.keys)
         let combined=rows+additional.map{["bvid":$0]}
         for row in combined{
@@ -201,7 +138,8 @@ struct PortableArchive: Codable {
         return rows.count
     }
     private func merge(_ archive:PortableArchive)throws{
-        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        var byID:[String:SavedVideo]=[:]
+        for item in videos {byID[item.bvid]=item}
         for item in archive.videos{
             guard Self.parseBV(item.bvid)==item.bvid else{continue}
             if let previous=byID[item.bvid]{
@@ -213,6 +151,7 @@ struct PortableArchive: Codable {
                 merged.topics=Array(Set(previous.topics+item.topics)).sorted()
                 merged.sourceFolders=Array(Set(previous.sourceFolders+item.sourceFolders)).sorted()
                 merged.watched=previous.watched||item.watched
+                if let incoming=item.progress { merged.progress=incoming }
                 if merged.notes.isEmpty{merged.notes=item.notes}
                 byID[item.bvid]=merged
             }else{byID[item.bvid]=item}

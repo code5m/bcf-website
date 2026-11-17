@@ -1,5 +1,5 @@
 import {DatabaseSync} from "node:sqlite";
-import {mkdir,copyFile,rename,chmod,stat,unlink} from "node:fs/promises";
+import {mkdir,copyFile,link,chmod,stat,unlink} from "node:fs/promises";
 import {dirname,resolve} from "node:path";
 import {randomUUID} from "node:crypto";
 // Never overwrite an existing live database. Stop all application instances before restoring.
@@ -22,6 +22,8 @@ try{
    if(!format&&!legacy)throw Error("not_tongpin_database");
  }finally{db.close();}
  await chmod(temporary,0o600);
- await rename(temporary,to);
+ // Never overwrite a path created after the preliminary existence check.
+ await link(temporary,to);
+ await unlink(temporary);
  console.log(JSON.stringify({ok:true,restored:to}));
 }finally{await unlink(temporary).catch(()=>{});}
