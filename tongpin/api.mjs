@@ -460,6 +460,31 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res,200,{items:curated});
         return true;
       }
+      if (method === "GET" && path === "/candidates") {
+        limit(req,"public-candidates",100,60000);
+        // Cursor contains only the already-public profile UUID. The request
+        // MUST NOT accept a list/hash/filter of a visitor's private BV IDs.
+        const after=url.searchParams.get("after")||"";
+        if(after && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(after))
+          fail(400,"invalid_cursor");
+        const db=await read();
+        let viewer=null;
+        try{viewer=auth(db,req);}catch{}
+        const eligible=db.users.filter(u=>
+          u.id>after && u.profile?.discoverable && Array.isArray(u.showcase) && u.showcase.length>0 &&
+          !(u.suspendedUntil && new Date(u.suspendedUntil).getTime()>Date.now()) &&
+          (!viewer || (viewer.id!==u.id && !peersBlocked(viewer,u)))
+        ).sort((a,b)=>a.id.localeCompare(b.id));
+        const page=eligible.slice(0,40);
+        json(res,200,{
+          people:page.map(u=>({
+            ...publicProfile(u),
+            relationship:viewer?(connection(db,viewer.id,u.id)?.status||"none"):"none"
+          })),
+          nextCursor:eligible.length>40?page.at(-1).id:null
+        });
+        return true;
+      }
       if (method === "GET" && path === "/people") {
         limit(req, "discovery", 60, 60000);
         const db = await read();
