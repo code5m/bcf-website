@@ -34,7 +34,7 @@ function notify(text, isError = false) {
   box.hidden = false;
 }
 const state = {
-  items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
+  items: [], showcase: [], user: null, people: [], connections: [], blocked: [], communityFeed: [], communityStatus:"loading",
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
   studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:""
 };
@@ -206,6 +206,7 @@ function setTab(tab) {
   $("page-title").textContent=({
     library:"刷视频",learning:"一起共学",showcase:"我的分享",discover:"遇见同好",friends:"消息",account:"我的资料"
   })[tab];
+  if(tab==="library")refreshCommunityFeed();
   if(tab==="learning"){renderLearning();refreshStudyPlans();}
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
@@ -289,6 +290,49 @@ function renderFeed(){
     (inDraft?"✓ 已放进精选":"♡ 分享到精选")+'</button></div>'+
     '<small class="spotlight-disclaimer">精选只会保存草稿；正式公开仍需你到「分享」页确认。</small></div></article>';
 }
+function renderCommunityFeed(){
+  const target=$("community-list");
+  if(!target)return;
+  if(state.communityStatus==="loading"){
+    target.innerHTML='<div class="community-empty">正在寻找真实用户主动分享的内容…</div>';
+    return;
+  }
+  if(state.communityStatus==="offline"){
+    target.innerHTML='<div class="community-empty"><strong>公开分享暂时无法加载</strong><p>社交服务未连接，本地视频和私人片单仍然可以使用。</p></div>';
+    return;
+  }
+  if(!state.communityFeed.length){
+    target.innerHTML='<div class="community-empty"><strong>还没有人公开分享视频。</strong>'+
+      '<p>这里不会放虚构视频充数。你可以从自己的真实收藏里选择几条，成为首批分享者。</p>'+
+      '<button class="button button-primary" data-action="showcase">去整理我的精选 →</button></div>';
+    return;
+  }
+  target.innerHTML=state.communityFeed.map(item=>{
+    const user=item.curator||{};
+    const caption=item.caption?'<p class="community-caption">'+escapeHtml(item.caption)+'</p>':"";
+    return '<article class="community-card">'+videoPoster(item)+
+      '<div class="community-card-body"><div class="curator-line"><div class="curator-avatar">'+
+      escapeHtml((user.displayName||user.handle||"?").slice(0,1))+'</div><div><b>'+
+      escapeHtml(user.displayName||user.handle||"同频用户")+'</b><small>@'+
+      escapeHtml(user.handle||"")+' · 主动公开精选</small></div></div>'+
+      '<h4>'+escapeHtml(item.title)+'</h4>'+caption+
+      '<div class="tags">'+tagsHtml(item.tags)+'</div></div></article>';
+  }).join("");
+}
+async function refreshCommunityFeed(){
+  const epoch=state.sessionEpoch;
+  try{
+    const result=await api("/feed");
+    if(epoch!==state.sessionEpoch)return;
+    state.communityFeed=result.items||[];
+    state.communityStatus="loaded";
+  }catch{
+    if(epoch!==state.sessionEpoch)return;
+    state.communityFeed=[];
+    state.communityStatus="offline";
+  }
+  renderCommunityFeed();
+}
 function renderLocal() {
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
   $("stat-topics").textContent=new Set(state.items.flatMap(i=>i.tags||[])).size.toLocaleString("zh-CN");
@@ -312,6 +356,7 @@ function renderLocal() {
   renderShowcase();
   renderLearning();
   renderFeed();
+  renderCommunityFeed();
 }
 function renderShowcase() {
   const items=state.showcase;
@@ -518,6 +563,8 @@ function clearSocialSession(){
   state.user=null;state.people=[];state.connections=[];state.blocked=[];
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
+  state.communityFeed=[];state.communityStatus="loading";
+  if($("community-list"))renderCommunityFeed();
   state.messageCursor=null;
   if($("unread-count"))$("unread-count").hidden=true;
   if($("load-older"))$("load-older").hidden=true;
@@ -747,6 +794,7 @@ function wire() {
     $(id).onclick=()=>setTab("discover");
   }
   $("meet-profile-cta").onclick=()=>setTab("account");
+  $("refresh-community").onclick=refreshCommunityFeed;
   $("feed-channels").addEventListener("click",event=>{
     const button=event.target.closest("button[data-feed-tag]");
     if(!button)return;
@@ -984,6 +1032,7 @@ async function init() {
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
   await refreshNotifications();
+  await refreshCommunityFeed();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
     if(!state.user || document.visibilityState!=="visible")return;
