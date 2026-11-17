@@ -207,3 +207,48 @@ test("match excludes unrelated profiles by default, even when they are discovera
   assert.equal(matchPublic({showcase:[{bvid:"BV1234567890"}],profile:{topics:["电影"]}},
     {showcase:[{bvid:"BV0987654321"}],profile:{topics:["英语"]}}).score,0);
 });
+
+test("consent-driven study plan only shares explicit goals with a friend, not private videos",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-study-"));
+  const handle=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>handle(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
+  const base="http://127.0.0.1:"+server.address().port;
+  async function request(path,method="GET",payload,cookie=""){
+    const r=await fetch(base+"/api/social"+path,{
+      method,headers:{Origin:base,"X-Tongpin-Request":"1","Content-Type":"application/json",
+        ...(cookie?{Cookie:cookie}:{})},
+      body:payload===undefined?undefined:JSON.stringify(payload)});
+    return {status:r.status,data:await r.json(),cookie:(r.headers.get("set-cookie")||"").split(";")[0]};
+  }
+  try{
+    const a=await request("/register","POST",{handle:"study_alice",password:"strongpass-123",adult:true,acceptTerms:true});
+    const b=await request("/register","POST",{handle:"study_bob",password:"strongpass-123",adult:true,acceptTerms:true});
+    const cookieA=a.cookie,cookieB=b.cookie;
+    assert.equal((await request("/study/plans","POST",{peerId:b.data.user.id,topic:"电影",goals:["写剧本"]},cookieA)).status,403);
+    const demo={items:[{bvid:"BV1234567890",title:"同一个公开视频"}]};
+    await request("/showcase","PUT",demo,cookieA);
+    await request("/showcase","PUT",demo,cookieB);
+    await request("/me","PUT",{displayName:"Alice",topics:["电影"],discoverable:true},cookieA);
+    await request("/me","PUT",{displayName:"Bob",topics:["电影"],discoverable:true},cookieB);
+    const friend=await request("/connections","POST",{targetId:b.data.user.id},cookieA);
+    await request("/connections/"+friend.data.id,"PUT",{action:"accept"},cookieB);
+    const plan=await request("/study/plans","POST",{peerId:b.data.user.id,topic:"AI 电影",goals:["做分镜","剪辑一段视频"]},cookieA);
+    assert.equal(plan.status,201);
+    const listB=await request("/study/plans","GET",undefined,cookieB);
+    assert.equal(listB.data.plans.length,1);
+    assert.equal(listB.data.plans[0].incoming,true);
+    assert.equal(JSON.stringify(listB.data).includes("私人笔记"),false);
+    assert.equal((await request("/study/plans/"+plan.data.id,"PUT",{action:"accept"},cookieA)).status,403);
+    assert.equal((await request("/study/plans/"+plan.data.id,"PUT",{action:"accept"},cookieB)).status,200);
+    const toggle=await request("/study/plans/"+plan.data.id,"PUT",{action:"toggle",goalIndex:0},cookieA);
+    assert.deepEqual(toggle.data.mine,[0]);
+    const list=await request("/study/plans","GET",undefined,cookieB);
+    assert.deepEqual(list.data.plans[0].theirs,[0]);
+    assert.equal((await request("/blocks","POST",{targetId:b.data.user.id},cookieA)).status,200);
+    assert.equal((await request("/study/plans","GET",undefined,cookieB)).data.plans.length,0);
+  }finally{
+    await new Promise(ok=>server.close(ok));
+    await rm(dir,{recursive:true,force:true});
+  }
+});
