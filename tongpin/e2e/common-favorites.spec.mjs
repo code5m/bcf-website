@@ -10,10 +10,12 @@ test("private favorite matches a different user's opt-in public video without up
   });
   a.on("dialog",d=>d.accept());b.on("dialog",d=>d.accept());
   const unique=Date.now().toString(36);
+  const commonBV="BV"+unique.padStart(10,"0");
+  const privateOnlyBV="BV"+(unique+"z").slice(0,10).padStart(10,"0");
   try{
     await b.goto("/tongpin/");
     await b.locator("#add-trigger").click();
-    await b.locator('#add-form [name="bvid"]').fill("BV1234567890");
+    await b.locator('#add-form [name="bvid"]').fill(commonBV);
     await b.locator('#add-form [name="title"]').fill("公开的共同视频");
     await b.locator('#add-form .button-primary').click();
     await b.locator('#library-list [data-action="toggle"]').click();
@@ -35,9 +37,9 @@ test("private favorite matches a different user's opt-in public video without up
       name:"private-backup.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify({type:"tongpin_private_library",version:3,
         videos:[
-          {bvid:"BV1234567890",title:"我自己的标题",notes:"SUPER_PRIVATE_NOTE_X",
+          {bvid:commonBV,title:"我自己的标题",notes:"SUPER_PRIVATE_NOTE_X",
             sourceFolders:["我的私密文件夹"]},
-          {bvid:"BV0987654321",title:"只有我收藏的另一条",notes:"ANOTHER_PRIVATE_BV"}
+          {bvid:privateOnlyBV,title:"只有我收藏的另一条",notes:"ANOTHER_PRIVATE_BV"}
         ]}))
     });
     await a.locator('#nav [data-tab=discover]').click();
@@ -47,8 +49,8 @@ test("private favorite matches a different user's opt-in public video without up
     await expect(a.locator("#discover-list")).not.toContainText("SUPER_PRIVATE_NOTE_X");
     await expect(a.locator("#discover-list")).not.toContainText("我自己的标题");
     await expect(a.locator("#local-match-count")).toHaveText("1");
-    expect(JSON.stringify(requests)).not.toContain("BV1234567890");
-    expect(JSON.stringify(requests)).not.toContain("BV0987654321");
+    expect(JSON.stringify(requests)).not.toContain(commonBV);
+    expect(JSON.stringify(requests)).not.toContain(privateOnlyBV);
     expect(JSON.stringify(requests)).not.toContain("SUPER_PRIVATE_NOTE_X");
     expect(requests.some(x=>x.url.includes("/candidates"))).toBe(true);
 
@@ -76,10 +78,11 @@ test("private favorite matches a different user's opt-in public video without up
 test("private-only collections do not create a false remote discovery match",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
   await page.goto("/tongpin/");
+  const secretOnly="BV"+Date.now().toString(36).slice(-8).padStart(10,"Z");
   await page.locator("#import-file").setInputFiles({
     name:"private.json",mimeType:"application/json",
     buffer:Buffer.from(JSON.stringify({type:"tongpin_private_library",version:3,
-      videos:[{bvid:"BV1234567890",title:"未公开的收藏",notes:"隐私不是公开匹配证据"}]}))
+      videos:[{bvid:secretOnly,title:"未公开的收藏",notes:"隐私不是公开匹配证据"}]}))
   });
   await page.locator('#nav [data-tab=discover]').click();
   await expect(page.locator("#discover-list")).toContainText("暂未发现相同收藏");

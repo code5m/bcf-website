@@ -30,7 +30,7 @@ test("desktop and narrow-mobile layouts preserve navigation and prevent horizont
   await page.screenshot({path:"test-results/tongpin-desktop-library.png",fullPage:true});
   await page.setViewportSize({width:390,height:844});
   await expect(page.locator("#nav")).toBeVisible();
-  await expect(page.locator("#nav [data-tab=learning]")).toBeVisible();
+  await expect(page.locator("#nav .nav-item")).toHaveCount(4);
   const diagnostics=await page.evaluate(()=>{
     const vw=window.innerWidth;
     const bad=[...document.querySelectorAll("*")].filter(el=>{
@@ -54,7 +54,7 @@ test("desktop and narrow-mobile layouts preserve navigation and prevent horizont
   await expect(page.locator("#library-list .video-post-card")).toHaveCount(2);
   await page.locator("#nav [data-tab=discover]").click();
   await expect(page.locator("#meet-profile-cta")).toBeVisible();
-  await expect(page.locator("#discover-list")).toContainText("登录");
+  await expect(page.locator("#match-status")).toContainText("公开分享用户");
   await goTo(page,"learning");
   await expect(page.locator("#tab-learning")).toBeVisible();
   await goTo(page,"showcase");
