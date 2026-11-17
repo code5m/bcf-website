@@ -316,7 +316,9 @@ function renderCommunityFeed(){
       escapeHtml(user.displayName||user.handle||"同频用户")+'</b><small>@'+
       escapeHtml(user.handle||"")+' · 主动公开精选</small></div></div>'+
       '<h4>'+escapeHtml(item.title)+'</h4>'+caption+
-      '<div class="tags">'+tagsHtml(item.tags)+'</div></div></article>';
+      '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
+      '<div class="community-cta"><button data-action="request" data-id="'+escapeHtml(user.id)+
+      '">♡ 申请认识 TA</button></div></div></article>';
   }).join("");
 }
 async function refreshCommunityFeed(){
@@ -441,6 +443,7 @@ function renderAuth() {
   $("login-shortcut").textContent=logged?"我的资料":"登录 / 注册";
   $("auth-panel").hidden=logged;
   $("profile-panel").hidden=!logged;
+  $("share-next-step").hidden=!(logged && state.user.showcase?.length && !state.user.discoverable);
   $("stat-shared").textContent=state.user?.showcase?.length||0;
   if(logged){
     const form=$("profile-form");
@@ -764,7 +767,10 @@ async function actionHandler(event) {
       await refreshStudyPlans();
       notify(decision==="toggle"?"已更新你的共学进度。":"共学计划状态已更新。");
     }else if(action==="request"){
-      await api("/connections","POST",{targetId:id});notify("已发送交友申请。");await refreshPeople();
+      await api("/connections","POST",{targetId:id});
+      button.disabled=true;button.textContent="已发送申请";
+      notify("已发出申请；对方接受后才能聊天。");
+      await refreshPeople();
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
@@ -794,6 +800,7 @@ function wire() {
     $(id).onclick=()=>setTab("discover");
   }
   $("meet-profile-cta").onclick=()=>setTab("account");
+  $("share-next-profile").onclick=()=>setTab("account");
   $("refresh-community").onclick=refreshCommunityFeed;
   $("feed-channels").addEventListener("click",event=>{
     const button=event.target.closest("button[data-feed-tag]");
