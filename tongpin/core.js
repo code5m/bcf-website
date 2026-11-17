@@ -173,3 +173,29 @@ export function matchPublic(me, other) {
     sharedVideos, sharedTopics, sharedTags
   };
 }
+
+
+/**
+ * Local-only exact BV overlap. The caller MUST run this in the user's own
+ * browser; never send private IDs, derived hashes, overlap counts or notes to
+ * the social API. The candidate's videos are explicitly public showcases.
+ * This is an interest signal, not proof of Bilibili account ownership.
+ */
+export function matchLocalFavorites(privateItems, publicPeople) {
+  const mine=new Set((Array.isArray(privateItems)?privateItems:[])
+    .map(video=>bvidOf(typeof video==="string"?video:video?.bvid)).filter(Boolean));
+  return (Array.isArray(publicPeople)?publicPeople:[]).map(person=>{
+    const ids=new Set();
+    const videos=[];
+    for(const video of Array.isArray(person?.showcase)?person.showcase:[]) {
+      const id=bvidOf(video?.bvid);
+      if(id && mine.has(id) && !ids.has(id)){
+        ids.add(id);
+        // Only return fields the OTHER user deliberately made public.
+        videos.push({bvid:id,title:cleanText(video.title,150)});
+      }
+    }
+    return {...person,localOverlap:{count:videos.length,videos:videos.slice(0,5)}};
+  }).sort((a,b)=>b.localOverlap.count-a.localOverlap.count ||
+    String(a.handle||"").localeCompare(String(b.handle||"")));
+}

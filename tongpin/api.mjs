@@ -460,6 +460,31 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res,200,{items:curated});
         return true;
       }
+      if (method === "GET" && path === "/candidates") {
+        limit(req,"public-candidates",100,60000);
+        // Cursor contains only the already-public profile UUID. The request
+        // MUST NOT accept a list/hash/filter of a visitor's private BV IDs.
+        const after=url.searchParams.get("after")||"";
+        if(after && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(after))
+          fail(400,"invalid_cursor");
+        const db=await read();
+        let viewer=null;
+        try{viewer=auth(db,req);}catch{}
+        const eligible=db.users.filter(u=>
+          u.id>after && u.profile?.discoverable && Array.isArray(u.showcase) && u.showcase.length>0 &&
+          !(u.suspendedUntil && new Date(u.suspendedUntil).getTime()>Date.now()) &&
+          (!viewer || (viewer.id!==u.id && !peersBlocked(viewer,u)))
+        ).sort((a,b)=>a.id.localeCompare(b.id));
+        const page=eligible.slice(0,40);
+        json(res,200,{
+          people:page.map(u=>({
+            ...publicProfile(u),
+            relationship:viewer?(connection(db,viewer.id,u.id)?.status||"none"):"none"
+          })),
+          nextCursor:eligible.length>40?page.at(-1).id:null
+        });
+        return true;
+      }
       if (method === "GET" && path === "/people") {
         limit(req, "discovery", 60, 60000);
         const db = await read();
@@ -669,7 +694,19 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           if(peersBlocked(me,peer)||!connected(db,me.id,peer.id))fail(403,"friendship_required");
           const text=cleanText(input.text,1000);
           if(!text)fail(400,"message_required");
-          const msg={id:randomUUID(),from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
+          const supplied=String(input.clientMessageId||"");
+          if(supplied && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(supplied))
+            fail(400,"invalid_client_message_id");
+          const id=supplied||randomUUID();
+          // Client-generated UUID makes a retry idempotent after an ambiguous
+          // connection failure, but never permits forging another user's message.
+          const prior=store.db.prepare("SELECT payload FROM messages WHERE id=?").get(id);
+          if(prior){
+            const old=JSON.parse(prior.payload);
+            if(old.from!==me.id||old.to!==peer.id||old.text!==text)fail(409,"message_id_conflict");
+            return old;
+          }
+          const msg={id,from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
           store.appendMessage(msg);
           return msg;
         });
