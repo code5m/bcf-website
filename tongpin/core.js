@@ -80,7 +80,9 @@ export function normalizeImported(payload) {
     const base = dictionary(row.raw);
     const bvid = bvidOf(pick(row.bvid, row.bvId, base.bvid, row.url, row.id, key, ""));
     if (!bvid) { rejected++; return; }
-    const topicLabels = topicByVideo.get(bvid) || [];
+    // Preserve per-video membership even when no top-level topic record exists.
+    const topicLabels=[...new Set([...(topicByVideo.get(bvid)||[]),
+      ...shortList(row.topics).map(x=>cleanText(x,80)).filter(Boolean)])].slice(0,12);
     const fromVideo = cleanText(pick(row.title, row.name, base.title, base.name), 150);
     const isPlaceholder = !fromVideo || /^待补齐标题[ ·]/.test(fromVideo) || /^视频 BV[0-9A-Za-z]{10}$/.test(fromVideo);
     const title = fromVideo && !isPlaceholder ? fromVideo : "待补齐标题 · " + bvid;
