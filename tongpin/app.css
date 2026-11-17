@@ -599,3 +599,24 @@ body{background:#101116}
   .playlist-actions .button{font-size:11px;padding:8px 10px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar #nav .nav-item{transition:none}}
+
+
+/* Multiple real opt-in curators belong beneath one public video, not in duplicate posters. */
+.curator-contacts{display:grid;gap:8px;margin:8px 0 10px}
+.curator-contact{display:flex;align-items:center;gap:9px;min-width:0;padding:8px 0;border-top:1px solid #3e3440}
+.curator-contact .curator-avatar{flex:0 0 33px;width:33px;height:33px;border-radius:50%;
+  background:#594258;color:#fae5f1;font-size:13px}
+.curator-label{display:flex;flex-direction:column;min-width:0;flex:1}
+.curator-label b{font-size:12px;color:#f9e7ee}
+.curator-label small{font-size:10px;color:#b9adba;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.curator-contact button{border:1px solid #795566;background:#3b2a37;border-radius:8px;
+  color:#fce5ee;font-size:11px;white-space:nowrap;padding:8px 10px;min-height:37px}
+.curator-contact button:hover{background:#5e3f54}
+.curators-count{font-size:11px!important;color:#c9b2c5!important;margin:4px 0 8px}
+@media(max-width:650px){
+  .curator-contact{gap:5px}
+  .curator-contact .curator-avatar{width:27px;height:27px;flex-basis:27px;font-size:11px}
+  .curator-contact button{min-height:34px;font-size:10px;padding:6px}
+  .curator-label b{font-size:11px}
+  .curator-label small{font-size:9px}
+}

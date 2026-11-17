@@ -41,7 +41,7 @@ const state = {
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
   studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:"",topicVisible:{},communityLoadedAt:0,connectionsSnapshot:"",studySnapshot:"",
   candidates:[],candidateCursor:null,candidatesLoaded:false,candidatesLoading:false,
-  candidateChecked:0,candidateError:false,matchMode:"overlap",pendingContact:null
+  candidateChecked:0,candidateError:false,candidatesLoadedAt:0,matchMode:"overlap",pendingContact:null
 };
 let db;
 function openLocal() {
@@ -211,7 +211,7 @@ function setTab(tab) {
   });
   document.querySelectorAll(".panel-section").forEach(el=>el.hidden=el.id!=="tab-"+tab);
   $("page-title").textContent=({
-    library:"刷视频",learning:"一起共学",showcase:"我的分享",discover:"遇见同好",friends:"消息",account:"我的资料"
+    library:"视频",learning:"一起共学",showcase:"我的分享",discover:"遇见同好",friends:"消息",account:"我的资料"
   })[tab];
   if(tab==="library")refreshCommunityFeed();
   if(tab==="learning"){renderLearning();refreshStudyPlans();}
@@ -241,7 +241,6 @@ function videoPoster(item,large=false){
     '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
     '<span class="poster-play" aria-hidden="true">↗</span>'+
     '<span class="poster-bottom">'+
-    (large?'<strong>'+escapeHtml(item.title)+'</strong>':'')+
     '<small>在 B站观看 ↗</small></span></a>';
 }
 function cardHtml(item,place){
@@ -318,21 +317,37 @@ function renderCommunityFeed(){
     return;
   }
   const localIds=new Set(state.items.map(video=>video.bvid));
-  const publicItems=[...state.communityFeed].sort((a,b)=>
-    Number(localIds.has(b.bvid))-Number(localIds.has(a.bvid)));
-  target.innerHTML=publicItems.map(item=>{
-    const user=item.curator||{};
-    const caption=item.caption?'<p class="community-caption">'+escapeHtml(item.caption)+'</p>':"";
+  // One video is shown once. Multiple public curators appear beneath it,
+  // so duplicate popular videos do not flood the feed.
+  const grouped=new Map();
+  for(const item of state.communityFeed){
+    const id=bvidOf(item.bvid);
+    if(!id)continue;
+    if(!grouped.has(id))grouped.set(id,{item,curators:[]});
+    const group=grouped.get(id);
+    if(item.curator?.id && !group.curators.some(c=>c.id===item.curator.id))
+      group.curators.push({...item.curator,caption:item.caption||""});
+  }
+  const display=[...grouped.values()].sort((a,b)=>
+    Number(localIds.has(b.item.bvid))-Number(localIds.has(a.item.bvid)));
+  target.innerHTML=display.map(group=>{
+    const item=group.item;
+    const curators=group.curators.slice(0,6);
+    const shared=localIds.has(item.bvid);
+    const contacts=curators.map(user=>
+      '<div class="curator-contact"><span class="curator-avatar">'+
+      escapeHtml((user.displayName||user.handle||"?").slice(0,1))+'</span>'+
+      '<div class="curator-label"><b>'+escapeHtml(user.displayName||user.handle||"同好")+
+      '</b><small>'+escapeHtml(user.caption||"TA 主动公开了这条视频")+'</small></div>'+
+      '<button data-action="request" data-id="'+escapeHtml(user.id)+'" aria-label="申请认识 '+
+      escapeHtml(user.displayName||user.handle||"这位同好")+'">认识 TA</button></div>'
+    ).join("");
     return '<article class="community-card">'+videoPoster(item)+
-      '<div class="community-card-body"><div class="curator-line"><div class="curator-avatar">'+
-      escapeHtml((user.displayName||user.handle||"?").slice(0,1))+'</div><div><b>'+
-      escapeHtml(user.displayName||user.handle||"同频用户")+'</b><small>@'+
-      escapeHtml(user.handle||"")+' · 主动公开精选</small></div></div>'+
-      '<h4>'+escapeHtml(item.title)+'</h4>'+
-      (localIds.has(item.bvid)?'<p class="public-overlap-note">✓ 我也收藏了 · 本机比对</p>':'')+
-      caption+'<div class="tags">'+tagsHtml(item.tags)+'</div>'+
-      '<div class="community-cta"><button data-action="request" data-id="'+escapeHtml(user.id)+
-      '">从这条视频认识 TA</button></div></div></article>';
+      '<div class="community-card-body"><h4>'+escapeHtml(item.title)+'</h4>'+
+      (shared?'<p class="public-overlap-note">✓ 我也收藏了 · 仅本机比对</p>':'')+
+      '<p class="curators-count">'+curators.length+' 位用户主动公开分享</p>'+
+      '<div class="curator-contacts">'+contacts+'</div>'+
+      '<div class="tags">'+tagsHtml(item.tags)+'</div></div></article>';
   }).join("");
 }
 let communityRequest=null,communityRequestEpoch=-1;
@@ -662,9 +677,10 @@ function renderPeople(){
 let candidateRequest=null,candidateRequestEpoch=-1;
 async function loadCandidatePages({reset=false,pages=3}={}){
   if(candidateRequest && candidateRequestEpoch===state.sessionEpoch)return candidateRequest;
+  if(!reset&&state.candidatesLoaded&&Date.now()-state.candidatesLoadedAt>60000)reset=true;
   if(reset){
     state.candidates=[];state.candidateCursor=null;state.candidatesLoaded=false;
-    state.candidateChecked=0;state.candidateError=false;
+    state.candidateChecked=0;state.candidateError=false;state.candidatesLoadedAt=0;
   }
   if(state.candidatesLoaded && !state.candidateCursor)return;
   const epoch=state.sessionEpoch;
@@ -685,7 +701,7 @@ async function loadCandidatePages({reset=false,pages=3}={}){
         }
         state.candidateChecked+=response.people?.length||0;
         state.candidateCursor=response.nextCursor||null;
-        state.candidatesLoaded=true;
+        state.candidatesLoaded=true;state.candidatesLoadedAt=Date.now();
         if(!state.candidateCursor)break;
       }
       state.candidateError=false;
@@ -740,7 +756,7 @@ function clearSocialSession(){
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
   state.communityFeed=[];state.communityStatus="loading";state.communityLoadedAt=0;
   state.candidates=[];state.candidateCursor=null;state.candidatesLoaded=false;
-  state.candidateChecked=0;state.candidatesLoading=false;state.candidateError=false;
+  state.candidateChecked=0;state.candidatesLoading=false;state.candidateError=false;state.candidatesLoadedAt=0;
   state.pendingContact=null;state.matchMode="overlap";
   state.connectionsSnapshot="";state.studySnapshot="";
   if($("community-list"))renderCommunityFeed();

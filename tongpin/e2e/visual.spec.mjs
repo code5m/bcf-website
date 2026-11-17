@@ -11,7 +11,7 @@ test("desktop and narrow-mobile layouts preserve navigation and prevent horizont
   page.on("dialog",dialog=>dialog.accept());
   await page.setViewportSize({width:1440,height:900});
   await page.goto("/tongpin/");
-  await expect(page.locator("#page-title")).toHaveText("刷视频");
+  await expect(page.locator("#page-title")).toHaveText("视频");
   await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
   await expect(page.locator("#nav .nav-item")).toHaveCount(4);
   await expect(page.locator("#nav [data-tab=discover]")).toBeVisible();
@@ -27,6 +27,7 @@ test("desktop and narrow-mobile layouts preserve navigation and prevent horizont
   await expect(page.locator("#video-not-real-thumbnail")).toHaveCount(0);
   const videoLink=page.locator("#feed-feature .poster-large");
   await expect(videoLink).toHaveAttribute("href",/https:\/\/www\.bilibili\.com\/video\/BV/);
+  await expect(page.locator("#notice")).toBeHidden({timeout:7000});
   await page.screenshot({path:"test-results/tongpin-desktop-library.png",fullPage:true});
   await page.setViewportSize({width:390,height:844});
   await expect(page.locator("#nav")).toBeVisible();
