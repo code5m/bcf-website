@@ -87,7 +87,8 @@ export class SocialStore{
   begin(){
     this.db.exec("BEGIN IMMEDIATE");
     try{
-      this.previous=this.read();
+      // Regular social updates must never load and rewrite unbounded chat history.
+      this.previous=this.read({excludeMessages:true});
       return structuredClone(this.previous);
     }catch(e){this.db.exec("ROLLBACK");this.previous=null;throw e;}
   }
@@ -96,6 +97,16 @@ export class SocialStore{
       const before=this.previous||this.empty();
       for(const name of DOMAINS){
         const n=table(name);
+        if(name==="messages"){
+          // Supports migration/test writers that stage new messages in a transaction,
+          // without treating omitted historical messages as a deletion request.
+          const insert=this.db.prepare('INSERT INTO messages(id,owner,peer,created_at,status,payload) VALUES(?,?,?,?,?,?)');
+          for(const record of state.messages||[]){
+            if(!record.id||!record.from||!record.to)throw Error("invalid_message");
+            insert.run(record.id,record.from,record.to,stampOf(record),"",JSON.stringify(record));
+          }
+          continue;
+        }
         const existing=new Map((before[name]||[]).map(x=>[idOf(name,x),JSON.stringify(x)]));
         const now=new Set();
         const upsert=this.db.prepare('INSERT INTO "'+n+'"(id,owner,peer,created_at,status,payload) VALUES(?,?,?,?,?,?) '+
@@ -130,6 +141,17 @@ export class SocialStore{
     const rows=this.db.prepare('SELECT payload FROM messages WHERE ((owner=? AND peer=?) OR (owner=? AND peer=?))'+
       predicate+' ORDER BY created_at DESC,id DESC LIMIT ?').all(...params).map(r=>JSON.parse(r.payload));
     return {messages:rows.slice(0,page).reverse(),hasMore:rows.length>page};
+  }
+  deleteMessagesForUser(userId){
+    // Must be invoked while begin() owns a SQLite write transaction.
+    this.db.prepare("DELETE FROM messages WHERE owner=? OR peer=?").run(userId,userId);
+  }
+  health(){
+    // A real committed write/read probe; a fixed HTTP 200 cannot detect a read-only volume.
+    const now=String(Date.now())+"-"+Math.random().toString(16).slice(2);
+    this.db.prepare("INSERT INTO schema_meta(key,value) VALUES('health_probe',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(now);
+    if(this.db.prepare("SELECT value FROM schema_meta WHERE key='health_probe'").get()?.value!==now)throw Error("db_probe_mismatch");
+    return true;
   }
   appendMessage(record){
     if(!record?.id || !record.from || !record.to)throw Error("invalid_message");
