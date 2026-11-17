@@ -4,11 +4,11 @@ import {join, resolve} from "node:path";
 
 // Each domain now has its own SQLite table and indexed columns.
 // Existing social_state JSON and social.json files migrate exactly once in a transaction.
-const DOMAINS=["users","sessions","connections","messages","reports","invites","studyPlans","appeals","adminAudit"];
+const DOMAINS=["users","sessions","connections","messages","reports","invites","studyPlans","appeals","adminAudit","readStates","recoveryCodes"];
 const sqlName={studyPlans:"study_plans",adminAudit:"admin_audit"};
 const idOf=(name,row)=>name==="sessions"?row.key:name==="invites"?row.codeHash:row.id;
 const ownerOf=(name,row)=>name==="sessions"?row.userId:
-  name==="studyPlans"?row.creatorId:name==="appeals"?row.userId:
+  name==="studyPlans"?row.creatorId:name==="appeals"||name==="readStates"||name==="recoveryCodes"?row.userId:
   name==="messages"||name==="reports"||name==="connections"?row.from:null;
 const peerOf=(name,row)=>name==="studyPlans"?row.partnerId:
   name==="messages"||name==="connections"?row.to:name==="reports"?row.target:null;
@@ -130,6 +130,16 @@ export class SocialStore{
     const rows=this.db.prepare('SELECT payload FROM messages WHERE ((owner=? AND peer=?) OR (owner=? AND peer=?))'+
       predicate+' ORDER BY created_at DESC,id DESC LIMIT ?').all(...params).map(r=>JSON.parse(r.payload));
     return {messages:rows.slice(0,page).reverse(),hasMore:rows.length>page};
+  }
+  messagesForUser(userId){
+    return this.db.prepare("SELECT payload FROM messages WHERE owner=? OR peer=? ORDER BY created_at ASC,id ASC")
+      .all(userId,userId).map(r=>JSON.parse(r.payload));
+  }
+  unreadForUser(userId,readStates=[]){
+    const state=new Map(readStates.filter(s=>s.userId===userId).map(s=>[s.peerId,s.lastReadAt||""]));
+    return this.db.prepare("SELECT owner FROM messages WHERE peer=? GROUP BY owner").all(userId)
+      .map(p=>({peerId:p.owner,count:this.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE owner=? AND peer=? AND created_at>?")
+        .get(p.owner,userId,state.get(p.owner)||"").n})).filter(p=>p.count>0);
   }
   async backupTo(destination){
     return sqliteBackup(this.db,resolve(destination));
