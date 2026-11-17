@@ -37,6 +37,7 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private String remoteOrigin;
+    private boolean nativeExportBridgeRegistered = false;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -117,7 +118,7 @@ public final class MainActivity extends Activity {
     // A remote origin is included only after the user explicitly selects that HTTPS server.
     private void configureNativeExportBridge() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
-        WebViewCompat.removeWebMessageListener(webView, "TongpinNative");
+        if(nativeExportBridgeRegistered) WebViewCompat.removeWebMessageListener(webView, "TongpinNative");
         final Set<String> allowed = new HashSet<>();
         allowed.add("https://appassets.androidplatform.net");
         if (remoteOrigin != null && remoteOrigin.startsWith("https://")) allowed.add(remoteOrigin);
@@ -127,21 +128,27 @@ public final class MainActivity extends Activity {
                 if (!isMainFrame || !allowed.contains(from)) return;
                 try {
                     JSONObject payload = new JSONObject(message.getData());
-                    if (!"export".equals(payload.optString("type"))) return;
+                    String kind=payload.optString("type");
+                    boolean personal="export".equals(kind);
+                    boolean social="export-social".equals(kind);
+                    if(!personal && !social) return;
                     String content = payload.optString("content", "");
                     byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
                     if (bytes.length > 20_000_000 || bytes.length == 0)
                         throw new IllegalArgumentException("backup_invalid_or_too_large");
                     JSONObject archive = new JSONObject(content);
-                    if (!"tongpin_private_library".equals(archive.optString("type"))
-                        || !archive.has("videos"))
+                    String expected=personal?"tongpin_private_library":"tongpin_social_account_export";
+                    if(!expected.equals(archive.optString("type")) ||
+                       (personal && !archive.has("videos")) ||
+                       (social && !archive.has("account")))
                         throw new IllegalArgumentException("invalid_archive");
+                    final String filename=personal?"tongpin-private-backup.json":"tongpin-social-account.json";
                     runOnUiThread(() -> {
                         backupToSave = bytes;
                         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                         intent.setType("application/json");
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
-                        intent.putExtra(Intent.EXTRA_TITLE, "tongpin-private-backup.json");
+                        intent.putExtra(Intent.EXTRA_TITLE, filename);
                         startActivityForResult(intent, SAVE_JSON);
                     });
                 } catch (Exception ignored) {
@@ -149,6 +156,7 @@ public final class MainActivity extends Activity {
                         "私人备份导出失败：请检查备份格式和大小", Toast.LENGTH_LONG).show());
                 }
             });
+        nativeExportBridgeRegistered=true;
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
