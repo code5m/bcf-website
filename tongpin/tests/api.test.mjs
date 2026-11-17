@@ -133,3 +133,138 @@ test("invite-only deployment: admin issues single-use codes, reports and suspens
     else process.env.TONGPIN_ADMIN_TOKEN=prev.admin;
   }
 });
+
+test("imports a real-shaped BFC workbench backup while retaining topic membership and progress", () => {
+  const payload={type:"workbench_backup",version:1,state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"AI 电影实战",author:"作者A",raw:{title:"AI 电影实战",originalFolders:["默认收藏"]}}},
+    library:{topics:[{id:"learn",name:"AI 电影制作",items:["BV1234567890","BV0987654321"],chapters:["入门","实践"]}],
+      categories:{"BV1234567890":"电影"},watched:{"BV1234567890":true},
+      notes:{"BV1234567890":"本人的私人笔记"},progress:{"BV1234567890":{percent:38}}}
+  }};
+  const result=normalizeImported(payload);
+  assert.equal(result.kind,"bfc-backup");
+  assert.equal(result.items.length,2);
+  const known=result.items.find(v=>v.bvid==="BV1234567890");
+  assert.equal(known.title,"AI 电影实战");
+  assert.equal(known.notes,"本人的私人笔记");
+  assert.equal(known.watched,true);
+  assert.equal(known.progress,38);
+  assert.deepEqual(known.topics,["AI 电影制作"]);
+  assert.equal(result.metadataOnly,1);
+  assert.equal(result.items.find(v=>v.bvid==="BV0987654321").metadataMissing,true);
+  assert.equal(result.topics.length,1);
+});
+test("imports legacy BFC studio exports without fabricating metadata and round-trips Tongpin drafts",()=>{
+  const legacy={topics:[{name:"剪辑",items:["BV1234567890"]}],categories:{"BV1234567890":"视频创作"},watched:{"BV1234567890":true}};
+  const x=normalizeImported(legacy);
+  assert.equal(x.kind,"bfc-topics-only");
+  assert.equal(x.metadataOnly,1);
+  assert.equal(x.items[0].watched,true);
+  assert.match(x.items[0].title,/待补齐标题/);
+  const backup={type:"tongpin_private_library",videos:x.items,
+    showcaseDraft:[{bvid:"BV1234567890",title:"公开精选",tags:["电影"]}]};
+  const restored=normalizeImported(backup);
+  assert.equal(restored.showcaseDraft.length,1);
+  assert.equal(restored.showcaseDraft[0].notes,undefined);
+});
+test("rejects huge imports and does not invent invalid BV identities",()=>{
+  assert.throws(()=>normalizeImported({videos:Array.from({length:30001},()=>({bvid:"BV1234567890"}))}),/limit/);
+  assert.equal(normalizeImported({videos:[{id:"invalid"}]}).items.length,0);
+});
+
+test("password rotation keeps current session but revokes all other sessions",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-password-"));
+  const route=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>route(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
+  const base="http://127.0.0.1:"+server.address().port;
+  async function req(path,method,data,cookie){
+    const r=await fetch(base+"/api/social"+path,{
+      method,headers:{"Origin":base,"Content-Type":"application/json","X-Tongpin-Request":"1",...(cookie?{Cookie:cookie}:{})},
+      body:data===undefined?undefined:JSON.stringify(data)
+    });
+    return {status:r.status,body:await r.json(),cookie:(r.headers.get("set-cookie")||"").split(";")[0]};
+  }
+  try{
+    const created=await req("/register","POST",{handle:"password_user",password:"old-strong-password",adult:true,acceptTerms:true});
+    assert.equal(created.status,201);
+    const other=await req("/login","POST",{handle:"password_user",password:"old-strong-password"});
+    assert.equal(other.status,200);
+    assert.notEqual(created.cookie,other.cookie);
+    assert.equal((await req("/account/password","PUT",{currentPassword:"wrongpassword",newPassword:"new-strong-pass"},created.cookie)).status,403);
+    const changed=await req("/account/password","PUT",{currentPassword:"old-strong-password",newPassword:"new-strong-pass"},created.cookie);
+    assert.equal(changed.status,200);
+    assert.equal((await req("/people","GET",undefined,other.cookie)).status,401);
+    assert.equal((await req("/people","GET",undefined,created.cookie)).status,200);
+    assert.equal((await req("/login","POST",{handle:"password_user",password:"old-strong-password"})).status,401);
+    assert.equal((await req("/login","POST",{handle:"password_user",password:"new-strong-pass"})).status,200);
+  }finally{
+    await new Promise(ok=>server.close(ok));
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+test("match excludes unrelated profiles by default, even when they are discoverable",()=>{
+  assert.equal(matchPublic({showcase:[{bvid:"BV1234567890"}],profile:{topics:["电影"]}},
+    {showcase:[{bvid:"BV0987654321"}],profile:{topics:["英语"]}}).score,0);
+});
+
+test("consent-driven study plan only shares explicit goals with a friend, not private videos",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-study-"));
+  const handle=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>handle(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
+  const base="http://127.0.0.1:"+server.address().port;
+  async function request(path,method="GET",payload,cookie=""){
+    const r=await fetch(base+"/api/social"+path,{
+      method,headers:{Origin:base,"X-Tongpin-Request":"1","Content-Type":"application/json",
+        ...(cookie?{Cookie:cookie}:{})},
+      body:payload===undefined?undefined:JSON.stringify(payload)});
+    return {status:r.status,data:await r.json(),cookie:(r.headers.get("set-cookie")||"").split(";")[0]};
+  }
+  try{
+    const a=await request("/register","POST",{handle:"study_alice",password:"strongpass-123",adult:true,acceptTerms:true});
+    const b=await request("/register","POST",{handle:"study_bob",password:"strongpass-123",adult:true,acceptTerms:true});
+    const cookieA=a.cookie,cookieB=b.cookie;
+    assert.equal((await request("/study/plans","POST",{peerId:b.data.user.id,topic:"电影",goals:["写剧本"]},cookieA)).status,403);
+    const demo={items:[{bvid:"BV1234567890",title:"同一个公开视频"}]};
+    await request("/showcase","PUT",demo,cookieA);
+    await request("/showcase","PUT",demo,cookieB);
+    await request("/me","PUT",{displayName:"Alice",topics:["电影"],discoverable:true},cookieA);
+    await request("/me","PUT",{displayName:"Bob",topics:["电影"],discoverable:true},cookieB);
+    const friend=await request("/connections","POST",{targetId:b.data.user.id},cookieA);
+    await request("/connections/"+friend.data.id,"PUT",{action:"accept"},cookieB);
+    const plan=await request("/study/plans","POST",{peerId:b.data.user.id,topic:"AI 电影",goals:["做分镜","剪辑一段视频"]},cookieA);
+    assert.equal(plan.status,201);
+    const listB=await request("/study/plans","GET",undefined,cookieB);
+    assert.equal(listB.data.plans.length,1);
+    assert.equal(listB.data.plans[0].incoming,true);
+    assert.equal(JSON.stringify(listB.data).includes("私人笔记"),false);
+    assert.equal((await request("/study/plans/"+plan.data.id,"PUT",{action:"accept"},cookieA)).status,403);
+    assert.equal((await request("/study/plans/"+plan.data.id,"PUT",{action:"accept"},cookieB)).status,200);
+    const toggle=await request("/study/plans/"+plan.data.id,"PUT",{action:"toggle",goalIndex:0},cookieA);
+    assert.deepEqual(toggle.data.mine,[0]);
+    const list=await request("/study/plans","GET",undefined,cookieB);
+    assert.deepEqual(list.data.plans[0].theirs,[0]);
+    assert.equal((await request("/blocks","POST",{targetId:b.data.user.id},cookieA)).status,200);
+    assert.equal((await request("/study/plans","GET",undefined,cookieB)).data.plans.length,0);
+  }finally{
+    await new Promise(ok=>server.close(ok));
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+
+test("BFC topic notes, chapter order and original folder names survive round trip",()=>{
+  const folder="这是一个比较长的原始收藏文件夹名称_电影学习_后期制作_导演资料";
+  const topic="电影制作的高阶工作流与完整个人体系";
+  const data={type:"workbench_backup",state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"收藏视频",originalFolders:[folder]}},
+    library:{topics:[{name:topic,items:["BV1234567890"],notes:"这是专属的专题笔记",
+      chapters:["写作","拍摄","后期"],sections:{"BV1234567890":"拍摄"}}]}
+  }};
+  const result=normalizeImported(data);
+  assert.equal(result.items[0].sourceFolders[0],folder);
+  assert.equal(result.topics[0].name,topic);
+  assert.equal(result.topics[0].notes,"这是专属的专题笔记");
+  assert.deepEqual(result.topics[0].chapters,["写作","拍摄","后期"]);
+  assert.equal(result.topics[0].sections.BV1234567890,"拍摄");
+});

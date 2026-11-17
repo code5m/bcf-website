@@ -160,7 +160,8 @@ struct SocialWebView: UIViewRepresentable {
         func webView(_ webView:WKWebView,decidePolicyFor navigationAction:WKNavigationAction,
                      decisionHandler:@escaping(WKNavigationActionPolicy)->Void) {
             guard let target=navigationAction.request.url else {decisionHandler(.cancel);return}
-            if target.scheme=="https", target.host==allowedHost {decisionHandler(.allow);return}
+            if target.scheme=="https", target.host==allowedHost,
+               target.port==webView.url?.port {decisionHandler(.allow);return}
             if target.scheme=="about" {decisionHandler(.allow);return}
             if target.scheme=="https" {UIApplication.shared.open(target)}
             decisionHandler(.cancel)

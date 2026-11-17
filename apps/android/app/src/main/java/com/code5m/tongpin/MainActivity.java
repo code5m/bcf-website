@@ -17,6 +17,12 @@ import android.widget.EditText;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Toast;
+import org.json.JSONObject;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.io.OutputStream;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
@@ -24,6 +30,8 @@ import androidx.webkit.WebViewClientCompat;
 public final class MainActivity extends Activity {
     private static final String OFFLINE = "https://appassets.androidplatform.net/tongpin/index.html";
     private static final int CHOOSE_FILE = 42;
+    private static final int SAVE_JSON = 43;
+    private byte[] backupToSave;
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private String remoteOrigin;
@@ -37,7 +45,7 @@ public final class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);
-        settings.setAllowContentAccess(false);
+        settings.setAllowContentAccess(true); // Only the system file picker grants content URI access.
         settings.setAllowFileAccessFromFileURLs(false);
         settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -92,6 +100,34 @@ public final class MainActivity extends Activity {
         root.addView(webView, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
+        // The bridge exists only for our packaged asset origin, never for remote servers.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(
+                webView, "TongpinNative",
+                Collections.singleton("https://appassets.androidplatform.net"),
+                (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+                    if (!isMainFrame || !"https://appassets.androidplatform.net".equals(sourceOrigin.toString())) return;
+                    try {
+                        JSONObject payload = new JSONObject(message.getData());
+                        if (!"export".equals(payload.optString("type"))) return;
+                        String content = payload.optString("content", "");
+                        if (content.length() > 30_000_000 || !content.startsWith("{")) {
+                            throw new IllegalArgumentException("backup_invalid_or_too_large");
+                        }
+                        backupToSave = content.getBytes(StandardCharsets.UTF_8);
+                        runOnUiThread(() -> {
+                            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                            intent.setType("application/json");
+                            intent.addCategory(Intent.CATEGORY_OPENABLE);
+                            intent.putExtra(Intent.EXTRA_TITLE, "tongpin-private-backup.json");
+                            startActivityForResult(intent, SAVE_JSON);
+                        });
+                    } catch (Exception ignored) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "本地备份导出失败，请检查备份大小", Toast.LENGTH_LONG).show());
+                    }
+                });
+        }
         String origin = getPreferences(MODE_PRIVATE).getString("server", "");
         if (!origin.isEmpty()) {
             remoteOrigin = origin;
@@ -103,6 +139,20 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == SAVE_JSON) {
+            byte[] toSave = backupToSave;
+            backupToSave = null;
+            if (result == RESULT_OK && data != null && data.getData() != null && toSave != null) {
+                try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                    if (out == null) throw new IllegalStateException("no_output_stream");
+                    out.write(toSave);
+                    Toast.makeText(this, "私人备份已保存", Toast.LENGTH_SHORT).show();
+                } catch (Exception error) {
+                    Toast.makeText(this, "备份保存失败，请重试", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (request == CHOOSE_FILE && fileCallback != null) {
             fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
             fileCallback = null;

@@ -10,7 +10,6 @@ const errors = {
   account_suspended:"当前账号已暂停社交操作，可导出数据或申请删除。",
   invalid_credentials:"用户名或密码错误。",
   handle_taken:"用户名已被使用，请换一个。",
-  invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
   adult_and_terms_required:"使用社交功能需要年满 18 岁并同意条款。",
   publish_showcase_first:"请先精选至少一个视频并发布橱窗。",
   showcase_limit_20:"公开橱窗最多支持 20 条视频。",
@@ -21,7 +20,12 @@ const errors = {
   too_many_requests:"操作太频繁，请稍后重试。",
   same_origin_required:"安全验证未通过，请刷新页面后重试。",
   publish_requires_login:"请先登录，才可以发布收藏橱窗。",
-  local_storage_unavailable:"浏览器本地存储不可用，请使用支持 IndexedDB 的浏览器。"
+  local_storage_unavailable:"浏览器本地存储不可用，请使用支持 IndexedDB 的浏览器。",
+  invalid_import_file:"JSON 备份格式错误，请使用同频或 BFC 的备份。",
+  invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
+  invalid_password:"密码验证失败。",
+  invalid_or_duplicate_video:"橱窗包含重复或不合法 BV 视频。",
+  session_changed:"密码已更新，请重新登录。"
 };
 function notify(text, isError = false) {
   const box = $("notice");
@@ -31,7 +35,8 @@ function notify(text, isError = false) {
 }
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
-  chatPeer: null, chatMessages: [], tab: "library", page: 1, authMode: "register"
+  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
+  studyTarget:null,studyPlans:[]
 };
 let db;
 function openLocal() {
@@ -83,6 +88,8 @@ async function saveShowcase() {
 async function refreshLocal() {
   state.items = (await txGetAll("videos")).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
   state.showcase = (await txGet("settings","showcase"))?.value || [];
+  state.topics = (await txGet("settings","topics"))?.value || [];
+  state.localReady=true;
   renderLocal();
 }
 async function api(path,method="GET",payload) {
@@ -105,7 +112,7 @@ async function loadSession() {
   renderAuth();
 }
 function setTab(tab) {
-  if(!["library","showcase","discover","friends","account"].includes(tab))tab="library";
+  if(!["library","learning","showcase","discover","friends","account"].includes(tab))tab="library";
   state.tab=tab;
   document.querySelectorAll("[data-tab]").forEach(el=>{
     el.classList.toggle("active",el.dataset.tab===tab);
@@ -113,8 +120,9 @@ function setTab(tab) {
   });
   document.querySelectorAll(".panel-section").forEach(el=>el.hidden=el.id!=="tab-"+tab);
   $("page-title").textContent=({
-    library:"我的收藏",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
+    library:"我的收藏",learning:"学习专题",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
   })[tab];
+  if(tab==="learning"){renderLearning();refreshStudyPlans();}
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
   if(tab==="showcase")renderShowcase();
@@ -161,12 +169,74 @@ function renderLocal() {
   $("page-prev").disabled=state.page===1;
   $("page-next").disabled=state.page>=pages;
   renderShowcase();
+  renderLearning();
 }
 function renderShowcase() {
   const items=state.showcase;
+  $("published-summary").textContent=state.user?.showcase?.length
+    ? "服务器已公开 "+state.user.showcase.length+" 条精选收藏；当前浏览器草稿 "+items.length+" 条。编辑草稿不会自动改变公开内容。"
+    : "服务器尚未公开任何精选收藏，当前草稿 "+items.length+" 条。";
   $("showcase-list").innerHTML=items.length?items.map(x=>cardHtml(x,"showcase")).join("")
     :empty("公开橱窗还没有草稿","在「我的收藏」里选择你愿意公开的视频。");
 }
+
+function renderLearning() {
+  const videos=new Map(state.items.map(item=>[item.bvid,item]));
+  const savedTopics=state.topics.filter(t=>t && typeof t.name==="string" && Array.isArray(t.items));
+  const topics=savedTopics.length?savedTopics:
+    [...new Set(state.items.flatMap(item=>item.tags||[]))].slice(0,24).map(tag=>({
+      name:tag, items:state.items.filter(item=>(item.tags||[]).includes(tag)).map(item=>item.bvid)
+    }));
+  const el=$("learning-list");
+  if(!topics.length){el.innerHTML=empty("还没有学习专题","可以导入 BFC 备份，或先为私人收藏添加标签。");return;}
+  el.innerHTML=topics.slice(0,36).map((topic,index)=>{
+    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))].map(id=>videos.get(id)).filter(Boolean);
+    const done=selected.filter(x=>x.watched).length;
+    const percentage=selected.length?Math.round(done/selected.length*100):0;
+    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">LEARNING TRACK '+(index+1)+'</span><h4>'+
+      escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
+      '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
+      '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
+      (selected.length?'<div class="topic-videos">'+selected.slice(0,12).map(v=>'<div class="topic-video">'+
+        '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
+        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
+        (selected.length>12?'<p class="small-copy">本专题共 '+selected.length+' 条；这里只显示前12条。</p>':"")+'</div>':
+        '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
+  }).join("");
+}
+
+
+function renderStudyPlans() {
+  const target=$("study-plans");
+  if(!state.user){target.innerHTML=empty("注册后才能结伴学习","你的私人学习专题可以继续离线使用。");return;}
+  if(!state.studyPlans.length){target.innerHTML=empty("还没有共学计划","到「好友与消息」里向已同意交友的朋友发起一个学习邀请。");return;}
+  target.innerHTML=state.studyPlans.map(plan=>{
+    const total=plan.goals.length,mine=plan.mine.length,theirs=plan.theirs.length;
+    const avatar=escapeHtml(plan.peer?.displayName || "好友");
+    const goals=plan.goals.map((goal,index)=>{
+      const complete=plan.mine.includes(index),partner=plan.theirs.includes(index);
+      return '<div class="study-goal"><button data-action="study-toggle" data-id="'+plan.id+
+        '" data-index="'+index+'" aria-pressed="'+Boolean(complete)+'"'+
+        (plan.status!=="active"?" disabled":"")+'>'+(complete?"✓ 我已完成":"○ 标记完成")+'</button><span>'+
+        escapeHtml(goal)+'</span><small>'+(partner?"对方已完成":"对方尚未完成")+'</small></div>';
+    }).join("");
+    return '<article class="topic-card study-card"><div class="topic-heading"><div><span class="overline">'+
+      (plan.status==="active"?"共同进行中":plan.incoming?"等你同意":"等待好友同意")+
+      '</span><h4>'+escapeHtml(plan.topic)+'</h4></div><span class="progress-number">'+mine+'/'+total+'</span></div>'+
+      '<p>与 '+avatar+' 一起学习 · 你完成 '+mine+' 项，对方完成 '+theirs+' 项</p>'+
+      '<div class="progress-track"><span style="width:'+(total?Math.round(mine/total*100):0)+'%"></span></div>'+
+      '<div class="study-goals">'+goals+'</div><div class="card-actions">'+
+      (plan.incoming?'<button class="highlight" data-action="study-accept" data-id="'+plan.id+'">同意共学</button>'+
+        '<button data-action="study-decline" data-id="'+plan.id+'">拒绝</button>':"")+
+      '<button data-action="study-cancel" data-id="'+plan.id+'">结束计划</button></div></article>';
+  }).join("");
+}
+async function refreshStudyPlans(){
+  if(!state.user){state.studyPlans=[];renderStudyPlans();return;}
+  try{state.studyPlans=(await api("/study/plans")).plans;}catch(error){notify(error.message,true);}
+  renderStudyPlans();
+}
+
 function renderAuth() {
   const logged=Boolean(state.user);
   $("session-label").textContent=logged?"@"+state.user.handle:"离线私人模式";
@@ -188,6 +258,7 @@ function renderAuthMode() {
   $("auth-mode-register").classList.toggle("active",register);
   $("auth-mode-login").classList.toggle("active",!register);
   $("display-name-field").hidden=!register;
+  $("invite-field").hidden=!register;
   $("adult-field").hidden=!register;
   $("auth-submit").textContent=register?"创建账号":"登录";
   $("auth-form").elements.password.autocomplete=register?"new-password":"current-password";
@@ -209,12 +280,17 @@ function renderPeople() {
 }
 function renderConnections() {
   const connections=state.connections;
+  const incoming=connections.filter(c=>c.status==="pending" && c.direction==="incoming").length;
+  $("pending-count").hidden=incoming===0;
+  $("pending-count").textContent=String(incoming);
   $("friends-list").innerHTML=!state.user?empty("请先登录","只有双方同意才能建立联系。"):connections.length?
     connections.map(c=>'<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml(c.peer.displayName.slice(0,1))+'</div><div><h4>'+
       escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
       '<p>'+ (c.status==="accepted"?"已成为好友":c.direction==="incoming"?"对方向你发来交友申请":"等待对方接受申请")+'</p><div class="card-actions">'+
       (c.status==="pending"&&c.direction==="incoming"?'<button class="highlight" data-action="accept" data-id="'+c.id+'">同意</button><button data-action="decline" data-id="'+c.id+'">拒绝</button>':"")+
-      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button><button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
+      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button>'+
+      '<button data-action="study" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">结伴学习</button>'+
+      '<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
       '<button data-action="block" data-id="'+c.peer.id+'">拉黑</button><button data-action="report" data-id="'+c.peer.id+'">举报</button></div></article>').join("")
     :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
   $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
@@ -269,27 +345,52 @@ async function persistVideo(input) {
   await refreshLocal();
 }
 async function importFile(file) {
-  if(file.size>20_000_000)throw new Error("导入文件超过 20MB 限制");
-  const parsed=JSON.parse(await file.text());
-  const {items,rejected,duplicates}=normalizeImported(parsed);
+  if (file.size>20_000_000) throw new Error("导入文件超过 20MB 限制");
+  await importPayload(JSON.parse(await file.text()));
+}
+async function importPayload(parsed) {
+  const {items,rejected,duplicates,topics,showcaseDraft,metadataOnly,warnings}=normalizeImported(parsed);
   if(!items.length)throw new Error("未识别到有效 BV 视频，请导入 BFC 的 JSON 备份");
   const previous=new Map(state.items.map(i=>[i.bvid,i]));
   const merged=items.map(item=>{
     const old=previous.get(item.bvid);
     return old?{
-      ...old,tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
+      ...old,title:old.metadataMissing&&!item.metadataMissing?item.title:old.title,
+      metadataMissing:Boolean(old.metadataMissing&&item.metadataMissing),
+      watched:Boolean(old.watched||item.watched),progress:old.progress??item.progress,
+      topics:[...new Set([...(old.topics||[]),...(item.topics||[])])].slice(0,12),
+      notes:old.notes||item.notes,
+      tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
       sourceFolders:[...new Set([...(old.sourceFolders||[]),...(item.sourceFolders||[])])].slice(0,30),
       updatedAt:new Date().toISOString()
     }:{...item,updatedAt:new Date().toISOString()};
   });
   await txPutMany("videos",merged);
+  if(topics.length){
+    const current=(await txGet("settings","topics"))?.value || [];
+    const byName=new Map([...current,...topics].map(t=>[t.name,t]));
+    await txPutMany("settings",[{key:"topics",value:[...byName.values()].slice(0,100)}]);
+  }
+  if(showcaseDraft && confirm("此文件包含精选橱窗草稿，要恢复这些草稿吗？这不会自动公开。")){
+    state.showcase=showcaseDraft;
+    await saveShowcase();
+  }
   await refreshLocal();
-  notify("导入完成：识别 "+items.length+" 条，文件内去重 "+duplicates+" 条，跳过 "+rejected+" 条。仅保存到本机。");
+  notify("仅在本机导入 "+items.length+" 条；文件内重复 "+duplicates+" 条，跳过 "+rejected+" 条。"+
+    (metadataOnly?" "+metadataOnly+" 条缺少完整视频标题。":"")+(warnings[0]||""));
 }
 function exportLocal() {
-  const data={type:"tongpin_private_library",version:1,exportedAt:new Date().toISOString(),
-    videos:state.items,showcaseDraft:state.showcase};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const data={type:"tongpin_private_library",version:2,exportedAt:new Date().toISOString(),
+    videos:state.items,showcaseDraft:state.showcase,topics:state.topics};
+  const content=JSON.stringify(data,null,2);
+  if (window.TongpinNative?.postMessage) {
+    try {
+      window.TongpinNative.postMessage(JSON.stringify({type:"export",content}));
+      notify("请选择保存位置，将私人备份保存到你的 Android 设备。");
+      return;
+    }catch(error){notify("设备备份桥接不可用："+error.message,true);}
+  }
+  const blob=new Blob([content],{type:"application/json"});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
   a.href=url;a.download="tongpin-private-backup-"+new Date().toISOString().slice(0,10)+".json";
@@ -302,6 +403,13 @@ async function actionHandler(event) {
   const {action,id}=button.dataset;
   try {
     if(action==="toggle")return await updateShowcaseDraft(id);
+    if(action==="watched"){
+      const item=state.items.find(x=>x.bvid===id);
+      if(!item)return;
+      await txPutMany("videos",[{...item,watched:!item.watched,updatedAt:new Date().toISOString()}]);
+      await refreshLocal();
+      return;
+    }
     if(action==="remove"){
       if(!confirm("只删除本浏览器的私人视频记录？不会取消 B站收藏。"))return;
       await txDelete("videos",id);
@@ -320,7 +428,20 @@ async function actionHandler(event) {
       return;
     }
     if(!state.user){setTab("account");notify("请先创建账户或登录才能交友。");return;}
-    if(action==="request"){
+    if(action==="study"){
+      state.studyTarget={id,name:button.dataset.name};
+      $("study-form").reset();
+      $("study-dialog-title").textContent="邀请 "+state.studyTarget.name+" 一起学习";
+      $("study-dialog").showModal();
+    }else if(action==="study-accept" || action==="study-decline" || action==="study-cancel" ||
+      action==="study-toggle"){
+      if(action==="study-cancel" && !confirm("确认结束这个共学计划吗？"))return;
+      const decision=action==="study-toggle"?"toggle":action.replace("study-","");
+      await api("/study/plans/"+id,"PUT",{action:decision,
+        ...(decision==="toggle"?{goalIndex:Number(button.dataset.index)}:{})});
+      await refreshStudyPlans();
+      notify(decision==="toggle"?"已更新你的共学进度。":"共学计划状态已更新。");
+    }else if(action==="request"){
       await api("/connections","POST",{targetId:id});notify("已发送交友申请。");await refreshPeople();
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
@@ -338,11 +459,9 @@ async function actionHandler(event) {
     }else if(action==="unblock"){
       await api("/blocks/"+id,"DELETE",{});notify("已解除拉黑。");await refreshConnections();
     }else if(action==="report"){
-      const reason=prompt("请选择举报原因：harassment（骚扰） / spam（垃圾信息） / privacy（隐私） / other（其他）","spam");
-      if(reason===null)return;
-      const details=prompt("补充说明（选填，最多 300 字）","")||"";
-      await api("/reports","POST",{targetId:id,reason,details});
-      notify("举报已记录，等待人工审核；当前版本不提供自动处理承诺。");
+      state.reportTarget=id;
+      $("report-form").reset();
+      $("report-dialog").showModal();
     }
   }catch(e){notify(e.message,true);}
 }
@@ -350,6 +469,23 @@ function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
   $("import-trigger").onclick=()=>$("import-file").click();
+  $("import-bfc-local").onclick=async()=>{
+    const button=$("import-bfc-local");
+    if(!confirm("从本机 127.0.0.1:4198 读取你已有的 BFC 收藏备份并导入当前浏览器？不会访问 B站，也不会上传到社交服务。"))return;
+    button.disabled=true;
+    try{
+      const res=await fetch("/api/local/bfc-import",{method:"POST",
+        headers:{"X-Tongpin-Request":"1","Origin":location.origin},cache:"no-store"});
+      const data=await res.json();
+      if(!res.ok)throw Error(data.detail ? "本机 BFC 不可用："+data.detail : "请启动本机 BFC 工作台服务（默认4198）。");
+      await importPayload(data);
+    }catch(e){notify(e.message,true);}
+    finally{button.disabled=false;}
+  };
+  if(!["127.0.0.1","localhost"].includes(location.hostname)){
+    $("import-bfc-local").hidden=true;
+    $("local-bridge-status").textContent="当前是远程或移动端模式：请选择本地 JSON 备份手动导入，绝不远程访问你的 BFC 私人服务。";
+  }
   $("export-trigger").onclick=exportLocal;
   $("import-file").onchange=async e=>{
     try{const file=e.target.files[0];if(file)await importFile(file);}catch(err){notify(err.message,true);}
@@ -370,6 +506,13 @@ function wire() {
     }catch(err){notify(err.message,true);}
   };
   document.body.addEventListener("click",actionHandler);
+  $("unpublish-showcase").onclick=async()=>{
+    if(!state.user){setTab("account");return;}
+    if(!confirm("确认撤下服务端全部公开收藏？本机橱窗草稿会保留，方便日后重新发布。"))return;
+    try{state.user=(await api("/showcase","PUT",{items:[]})).user;
+      renderAuth();renderLocal();notify("已撤下所有公开收藏并关闭可发现性。");}
+    catch(e){notify(e.message,true);}
+  };
   $("publish-showcase").onclick=async()=>{
     if(!state.user){setTab("account");notify("请先登录，之后再发布精选收藏。");return;}
     if(!confirm("确认公开当前 "+state.showcase.length+" 条精选视频的标题、BV 号和标签？私人笔记不会上传。"))return;
@@ -417,6 +560,19 @@ function wire() {
       notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");
     }catch(e){notify(e.message,true);}
   };
+  $("password-form").onsubmit=async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,values=new FormData(form);
+    try{
+      await api("/account/password","PUT",{
+        currentPassword:values.get("currentPassword"),
+        newPassword:values.get("newPassword")
+      });
+      form.reset();
+      await loadSession();
+      notify("密码已修改，其他设备会话已退出。请妥善保管新密码。");
+    }catch(e){notify(e.message,true);}
+  };
   $("logout").onclick=async()=>{
     try {await api("/logout","POST",{});state.user=null;state.people=[];state.connections=[];state.chatPeer=null;
       renderAuth();renderLocal();setTab("library");notify("已退出。私人收藏仍留在当前浏览器。");}
@@ -428,6 +584,33 @@ function wire() {
     if(password===null)return;
     try {await api("/account","DELETE",{password});state.user=null;state.chatPeer=null;renderAuth();renderLocal();setTab("library");notify("社交账户已删除。私人收藏仍在本浏览器。");}
     catch(e){notify(e.message,true);}
+  };
+  $("cancel-study").onclick=()=>{$("study-dialog").close();state.studyTarget=null;};
+  $("study-form").onsubmit=async event=>{
+    event.preventDefault();
+    if(!state.studyTarget)return;
+    const data=new FormData(event.currentTarget);
+    const goals=String(data.get("goals")||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    if(goals.length<1||goals.length>5){notify("请填写 1–5 个明确的共同学习目标。",true);return;}
+    try{
+      await api("/study/plans","POST",{peerId:state.studyTarget.id,
+        topic:data.get("topic"),goals});
+      $("study-dialog").close();state.studyTarget=null;
+      notify("共学邀请已发送，对方同意后才会开始共享进度。");
+      setTab("learning");
+    }catch(error){notify(error.message,true);}
+  };
+  $("cancel-report").onclick=()=>{$("report-dialog").close();state.reportTarget=null;};
+  $("report-form").onsubmit=async event=>{
+    event.preventDefault();
+    if(!state.reportTarget)return;
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/reports","POST",{targetId:state.reportTarget,
+        reason:fields.get("reason"),details:fields.get("details")});
+      $("report-dialog").close();state.reportTarget=null;
+      notify("举报已提交审核。你也可以直接拉黑对方。");
+    }catch(e){notify(e.message,true);}
   };
   $("close-chat").onclick=()=>{state.chatPeer=null;renderChat();};
   $("chat-form").onsubmit=async event=>{
@@ -449,6 +632,18 @@ async function init() {
   try {db=await openLocal();await refreshLocal();}
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
+  // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
+  window.setInterval(async()=>{
+    if(!state.user || document.visibilityState!=="visible")return;
+    if(state.tab==="learning")await refreshStudyPlans();
+    if(state.tab==="friends"){
+      await refreshConnections();
+      if(state.chatPeer){
+        try{state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;renderChat();}
+        catch{/* Friendship may have been revoked: next user action displays the error. */}
+      }
+    }
+  },10000);
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/tongpin/sw.js",{scope:"/tongpin/"}).catch(()=>{});
   }

@@ -63,8 +63,24 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await b.locator("#refresh-friends").click();
     await b.locator("#friends-list [data-action=chat]").click();
     await expect(b.locator("#chat-list")).toContainText("一起学习电影制作吗？");
+    await b.locator("#friends-list [data-action=study]").click();
+    await b.locator('#study-form [name="topic"]').fill("一起学习电影创作");
+    await b.locator('#study-form [name="goals"]').fill("写一段短片脚本\n完成剪辑");
+    await b.locator("#study-form .button-primary").click();
+    await b.locator("[data-tab=learning]").click();
+    await expect(b.locator("#study-plans")).toContainText("等待好友同意");
+    await a.locator("[data-tab=learning]").click();
+    await expect(a.locator("#study-plans")).toContainText("等你同意");
+    await a.locator("#study-plans [data-action=study-accept]").click();
+    await expect(a.locator("#study-plans")).toContainText("共同进行中");
+    await a.locator("#study-plans [data-action=study-toggle]").first().click();
+    await expect(a.locator("#study-plans")).toContainText("你完成 1 项");
+    await b.locator("[data-tab=learning]").click();
+    await expect(b.locator("#study-plans")).toContainText("对方完成 1 项");
+    await b.locator("[data-tab=friends]").click();
     await b.locator("#friends-list [data-action=block]").click();
     await expect(b.locator("#friends-list")).not.toContainText("Alice");
+    await a.locator("[data-tab=friends]").click();
     await a.locator("#refresh-friends").click();
     await expect(a.locator("#friends-list")).not.toContainText("Bob");
   } finally {
@@ -81,4 +97,42 @@ test("visitor can use private library without registering and sees no fabricated
   const response=await page.request.get("/api/social/health");
   expect(response.status()).toBe(200);
   expect((await response.json()).externalBilibiliRequests).toBe(0);
+});
+
+test("BFC JSON imports topics, restores learning progress, and exports private backup",async({page})=>{
+  await page.goto("/tongpin/");
+  const payload={type:"workbench_backup",state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"电影后期入门",author:"创作者"}},
+    library:{topics:[{id:"film",name:"电影实践",items:["BV1234567890"]}],
+      categories:{"BV1234567890":"电影"},notes:{"BV1234567890":"私人笔记"},
+      watched:{"BV1234567890":false}}
+  }};
+  await page.locator("#import-file").setInputFiles({
+    name:"bfc-private-backup.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(payload))
+  });
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await expect(page.locator("#library-list")).toContainText("私人笔记");
+  await page.locator("[data-tab=learning]").click();
+  await expect(page.locator("#learning-list")).toContainText("电影实践");
+  await page.locator("[data-action=watched]").first().click();
+  await expect(page.locator("#learning-list")).toContainText("1/1");
+  await page.locator("[data-tab=library]").click();
+  const [download]=await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#export-trigger").click()
+  ]);
+  expect(download.suggestedFilename()).toContain("tongpin-private-backup-");
+});
+test("private sharing draft can be reverted without exposing private note",async({page})=>{
+  await page.goto("/tongpin/");
+  await page.locator("#add-trigger").click();
+  await page.locator('#add-form [name="bvid"]').fill("BV1234567890");
+  await page.locator('#add-form [name="title"]').fill("个人私密收藏");
+  await page.locator('#add-form [name="notes"]').fill("这个笔记绝不能公开");
+  await page.locator("#add-form .button-primary").click();
+  await page.locator("#library-list [data-action=toggle]").click();
+  await page.locator("[data-tab=showcase]").click();
+  await expect(page.locator("#showcase-list")).not.toContainText("这个笔记绝不能公开");
+  await page.locator("#showcase-list [data-action=toggle]").click();
+  await expect(page.locator("#showcase-list")).toContainText("公开橱窗还没有草稿");
 });

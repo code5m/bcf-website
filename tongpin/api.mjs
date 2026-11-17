@@ -4,7 +4,7 @@ import {resolve} from "node:path";
 import {cleanText, cleanTopics, matchPublic, normalizeShowcase} from "./core.js";
 
 const SESSION_AGE = 7 * 86400 * 1000;
-const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: []});
+const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: [], studyPlans: []});
 const sha = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
 const publicProfile = user => ({
@@ -90,7 +90,8 @@ function connected(db, a, b) {
     (c.from === a && c.to === b || c.from === b && c.to === a)));
 }
 function visiblePeer(db, user, peer) {
-  return user.id !== peer.id && !peersBlocked(user, peer) && peer.profile.discoverable && peer.showcase.length > 0;
+  return user.id !== peer.id && !peersBlocked(user, peer) && peer.profile.discoverable && peer.showcase.length > 0 &&
+    !(peer.suspendedUntil && new Date(peer.suspendedUntil).getTime()>Date.now());
 }
 function verifyAdmin(req) {
   const token=process.env.TONGPIN_ADMIN_TOKEN || "";
@@ -123,8 +124,17 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
     return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
-    const forwarded=process.env.TONGPIN_TRUST_PROXY === "1" ? String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
-    const ip = forwarded || String(req.socket.remoteAddress || "local");
+    const remote=String(req.socket.remoteAddress || "local");
+    const forwarded=process.env.TONGPIN_TRUST_PROXY === "1" ?
+      String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
+    const ip=/^[a-fA-F0-9.:]{3,45}$/.test(forwarded) ? forwarded : remote;
+    // Keep bounded in long-running, invite-only deployments.
+    if(rate.size>3000){
+      for(const [key,history] of rate) {
+        if(!history.some(x=>x> Date.now()-3600000))rate.delete(key);
+        if(rate.size<=2500)break;
+      }
+    }
     const key = group + ":" + ip;
     const now = Date.now();
     const current = (rate.get(key) || []).filter(x => x > now - windowMs);
@@ -198,6 +208,23 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {user: user ? ownProfile(user) : null});
         return true;
       }
+      if (method === "PUT" && path === "/account/password") {
+        limit(req,"password-change",8,3600000);
+        const input=await methodBody(req);
+        const current=String(input.currentPassword || "");
+        const next=String(input.newPassword || "");
+        if(next.length<12 || next.length>128 || next===current) fail(400,"invalid_new_password");
+        await transaction(db=>{
+          const me=auth(db,req);
+          if(!passwordValid(current,me.passwordHash))fail(403,"invalid_password");
+          me.passwordHash=passwordHash(next);
+          const key=cookieToken(req);
+          db.sessions=db.sessions.filter(s=>s.userId!==me.id || key && s.key===sha(key));
+          return true;
+        });
+        json(res,200,{ok:true,otherSessionsRevoked:true});
+        return true;
+      }
       if (method === "GET" && path === "/account/export") {
         const db=await read(), me=auth(db,req,{allowSuspended:true});
         json(res,200,{
@@ -259,6 +286,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           const relation=db.connections.find(c=>c.id===id&&(c.from===me.id||c.to===me.id));
           if(!relation)fail(404,"relation_not_found");
           db.connections=db.connections.filter(c=>c.id!==id);
+          db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===relation.from&&p.partnerId===relation.to)||(p.creatorId===relation.to&&p.partnerId===relation.from)));
           return true;
         });
         json(res,200,{ok:true});
@@ -295,13 +323,90 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return true;
       }
       if (method === "GET" && path === "/people") {
+        limit(req, "discovery", 60, 60000);
         const db = await read();
         const me = auth(db, req);
         const people = db.users.filter(u => visiblePeer(db, me, u)).map(user => ({
           ...publicProfile(user), match: matchPublic(me, user),
           relationship: connection(db, me.id, user.id)?.status || "none"
-        })).sort((a,b) => b.match.score - a.match.score || a.handle.localeCompare(b.handle)).slice(0, 100);
+        })).filter(person=>person.match.score>0 || person.relationship==="accepted")
+          .sort((a,b) => b.match.score - a.match.score || a.handle.localeCompare(b.handle)).slice(0, 100);
         json(res, 200, {people});
+        return true;
+      }
+      if (method === "GET" && path === "/study/plans") {
+        limit(req,"study-read",60,60000);
+        const db=await read(),me=auth(db,req);
+        const plans=(db.studyPlans || []).filter(plan=>
+          ["pending","active"].includes(plan.status) &&
+          (plan.creatorId===me.id || plan.partnerId===me.id) &&
+          connected(db,plan.creatorId,plan.partnerId) &&
+          !peersBlocked(byId(db,plan.creatorId),byId(db,plan.partnerId)))
+          .sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100)
+          .map(plan=>{
+            const partner=byId(db,plan.creatorId===me.id?plan.partnerId:plan.creatorId);
+            return {id:plan.id,topic:plan.topic,goals:plan.goals,status:plan.status,
+              incoming:plan.partnerId===me.id && plan.status==="pending",
+              peer:{id:partner.id,displayName:partner.profile.displayName,handle:partner.handle},
+              mine:plan.progress?.[me.id] || [],theirs:plan.progress?.[partner.id] || [],
+              createdAt:plan.createdAt};
+          });
+        json(res,200,{plans});
+        return true;
+      }
+      if (method === "POST" && path === "/study/plans") {
+        limit(req,"study-create",10,3600000);
+        const input=await methodBody(req);
+        const topic=cleanText(input.topic,80);
+        const goals=Array.isArray(input.goals) ?
+          [...new Set(input.goals.map(x=>cleanText(x,100)).filter(Boolean))].slice(0,5) : [];
+        if(!topic || !goals.length || goals.length>5)fail(400,"invalid_study_plan");
+        const id=await transaction(db=>{
+          const me=auth(db,req),peer=byId(db,input.peerId);
+          if(!connected(db,me.id,peer.id) || peersBlocked(me,peer))fail(403,"friendship_required");
+          if(peer.suspendedUntil && new Date(peer.suspendedUntil).getTime()>Date.now())fail(403,"peer_unavailable");
+          const now=new Date().toISOString(),id=randomUUID();
+          db.studyPlans ||= [];
+          if(db.studyPlans.filter(p=>["pending","active"].includes(p.status) &&
+              (p.creatorId===me.id || p.partnerId===me.id)).length>=25)fail(429,"study_plan_limit");
+          db.studyPlans.push({id,creatorId:me.id,partnerId:peer.id,topic,goals,
+            status:"pending",progress:{[me.id]:[],[peer.id]:[]},createdAt:now});
+          return id;
+        });
+        json(res,201,{id,status:"pending"});
+        return true;
+      }
+      if (method === "PUT" && path.startsWith("/study/plans/")) {
+        const input=await methodBody(req),id=path.slice("/study/plans/".length);
+        const action=input.action;
+        if(!["accept","decline","cancel","toggle"].includes(action))fail(400,"invalid_study_action");
+        const outcome=await transaction(db=>{
+          const me=auth(db,req);
+          const plan=(db.studyPlans || []).find(p=>p.id===id &&
+            (p.creatorId===me.id || p.partnerId===me.id));
+          if(!plan)fail(404,"study_plan_not_found");
+          if(action==="cancel"){
+            if(!["pending","active"].includes(plan.status))fail(409,"study_plan_inactive");
+            plan.status="cancelled";
+          }else{
+            const partner=byId(db,plan.creatorId===me.id?plan.partnerId:plan.creatorId);
+            if(!connected(db,me.id,partner.id) || peersBlocked(me,partner))fail(403,"friendship_required");
+            if(action==="accept"||action==="decline"){
+              if(plan.partnerId!==me.id||plan.status!=="pending")fail(403,"incoming_plan_required");
+              plan.status=action==="accept"?"active":"declined";
+            }else{
+              if(plan.status!=="active")fail(409,"study_plan_not_active");
+              const index=Number(input.goalIndex);
+              if(!Number.isInteger(index)||index<0||index>=plan.goals.length)fail(400,"invalid_goal_index");
+              plan.progress ||= {};
+              const mine=new Set(plan.progress[me.id] || []);
+              if(mine.has(index))mine.delete(index);else mine.add(index);
+              plan.progress[me.id]=[...mine].sort((a,b)=>a-b);
+            }
+          }
+          return {status:plan.status,mine:plan.progress?.[me.id] || []};
+        });
+        json(res,200,{ok:true,...outcome});
         return true;
       }
       if (method === "GET" && path === "/connections") {
@@ -320,6 +425,10 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           const me = auth(db, req), target = byId(db, input.targetId);
           if (!visiblePeer(db, me, target)) fail(403, "peer_not_discoverable");
           if (connection(db, me.id, target.id)) fail(409, "request_exists");
+          if (db.connections.some(c=>c.from===me.id && c.to===target.id &&
+              c.status==="declined" && Date.now()-new Date(c.createdAt).getTime()<7*86400000)) {
+            fail(429,"recent_declined_request");
+          }
           const id = randomUUID();
           db.connections.push({id, from: me.id, to: target.id, status: "pending", createdAt: new Date().toISOString()});
           return id;
@@ -348,6 +457,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           if (me.id === peer.id) fail(400, "cannot_block_self");
           me.blocked = [...new Set([...(me.blocked || []), peer.id])];
           db.connections = db.connections.filter(c => !(c.from === me.id && c.to === peer.id || c.from === peer.id && c.to === me.id));
+          db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===me.id&&p.partnerId===peer.id)||(p.creatorId===peer.id&&p.partnerId===me.id)));
           return true;
         });
         json(res, 200, {ok: true});
@@ -364,6 +474,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return true;
       }
       if (method === "GET" && path === "/messages") {
+        limit(req, "message-read", 80, 60000);
         const db = await read();
         const me = auth(db, req);
         const peer = byId(db, url.searchParams.get("peer"));
@@ -411,6 +522,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           db.sessions = db.sessions.filter(s => s.userId !== me.id);
           db.connections = db.connections.filter(c => c.from !== me.id && c.to !== me.id);
           db.messages = db.messages.filter(m => m.from !== me.id && m.to !== me.id);
+          db.studyPlans=(db.studyPlans||[]).filter(p=>p.creatorId!==me.id&&p.partnerId!==me.id);
           db.reports = db.reports.filter(r => r.from !== me.id && r.target !== me.id);
           db.users.forEach(u => {u.blocked = (u.blocked || []).filter(id => id !== me.id);});
           return true;

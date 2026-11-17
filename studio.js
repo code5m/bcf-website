@@ -6,7 +6,7 @@ let state;try{state=JSON.parse(localStorage.getItem(key))||{topics:[],categories
 const save=()=>{localStorage.setItem(key,JSON.stringify(state));if(sessionToken){clearTimeout(syncTimer);syncTimer=setTimeout(syncServer,250);}};
 async function syncServer(){
  try{
-  const response=await fetch('/api/workbench/state',{method:'PUT',headers:{'Content-Type':'application/json','Origin':location.origin,'X-Local-CSRF':sessionToken},body:JSON.stringify({expectedRevision:serverRevision,library:state})});
+  const response=await fetch('/api/workbench/state',{method:'PUT',headers:{'Content-Type':'application/json','Origin':location.origin,'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'},body:JSON.stringify({expectedRevision:serverRevision,library:state})});
   if(!response.ok)throw Error('服务端保存失败');
   serverRevision=(await response.clone().json()).summary.revision;
   $('message').dataset.server='已同步服务端';
@@ -100,7 +100,7 @@ $('new-topic').onclick=()=>edit();$('edit-topic').onclick=()=>edit(state.topics.
 $('back').onclick=()=>location.hash='topics';$('find-videos').onclick=()=>{location.hash='library';};for(const id of ['search','filter','confidence'])$(id).oninput=()=>{page=1;library();};$('prev').onclick=()=>{page--;library();};$('next').onclick=()=>{page++;library();};$('select-page').onchange=e=>{for(const c of $('videos').querySelectorAll('input[type=checkbox]')){c.checked=e.target.checked;c.dispatchEvent(new Event('change'));}};
 $('add-selected').onclick=()=>{const t=state.topics.find(t=>t.id===$('assign-topic').value);if(!t){edit();return;}const before=t.items.length;if(selected.size)t.customized=true;addToTopic(t,[...selected]);save();$('message').textContent=`已将 ${t.items.length-before} 条新视频加入「${t.name}」，重复项自动跳过`;selected.clear();library();};$('recategorize').onclick=()=>{const c=$('assign-category').value;for(const id of selected)state.categories[id]=c;refreshCategoryTopics(state,rows);save();$('message').textContent=`已修改 ${selected.size} 条视频分类`;selected.clear();menus();library();};
 $('export').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'})),a=el('a','');a.href=u;a.download='my-video-library.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);};
-$('logout').onclick=async()=>{if(!sessionToken)return;const response=await fetch('/api/session/logout',{method:'POST',headers:{'X-Local-CSRF':sessionToken}});if(response.ok){sessionToken=null;$('message').textContent='已退出当前会话，专题数据仍保留。';}};
+$('logout').onclick=async()=>{if(!sessionToken)return;const response=await fetch('/api/session/logout',{method:'POST',headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1','Origin':location.origin,'Content-Type':'application/json'},body:'{}'});if(response.ok){sessionToken=null;$('message').textContent='已退出当前会话，专题数据仍保留。';}};
 $('import').onchange=async e=>{
  if(!e.target.files.length)return;
  try{
@@ -110,7 +110,7 @@ $('import').onchange=async e=>{
  }catch(err){$('message').textContent=err.message;}
 };
 addEventListener('hashchange',navigate);
-fetch('/api/session').then(r=>r.json()).then(session=>{sessionToken=session.token;return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken}})}).then(r=>{
+fetch('/api/session',{headers:{'X-Tongpin-Local':'1'}}).then(r=>{if(!r.ok)throw Error('原 BFC 未连接');return r.json();}).then(session=>{sessionToken=session.token;return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}})}).then(r=>{
  if(!r.ok)throw Error('服务端视频库暂不可用');
  return r.json();
 }).then(x=>{
@@ -130,5 +130,5 @@ fetch('/api/session').then(r=>r.json()).then(session=>{sessionToken=session.toke
   state.initialized=true;save();
  }
  menus();refreshCategoryTopics(state,rows);save();navigate();updateOverview();
- return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
-}).catch(e=>{data={};rows=[['BV1demo001','英语表达入门：从听懂到开口','英语'],['BV1demo002','建立自己的 AI 学习路径','AI'],['BV1demo003','如何把收藏整理成专题','效率']].map(([bvid,title,topic])=>({bvid,title,topic,confidence:'medium',reason:'Web 体验示例'}));state.initialized=true;for(const topic of [...new Set(rows.map(category))])state.topics.push({id:topic,name:topic+' · 精选',description:'把感兴趣的内容编成自己的观看路径。',chapters:['入门','进阶'],sections:{},items:rows.filter(r=>category(r)===topic).map(r=>r.bvid)});$('message').textContent='Web 体验预览 · 已加载示例内容';navigate();updateOverview();});
+ return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
+}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198）。没有加载虚构视频；请前往「同频」选择本机导入或手动 JSON 导入。';navigate();});

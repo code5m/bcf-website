@@ -17,6 +17,7 @@
     <p class="brand-caption">因收藏而相识。</p>
     <nav id="nav" aria-label="功能导航">
       <button class="nav-item active" data-tab="library"><span>▦</span> 我的收藏</button>
+      <button class="nav-item" data-tab="learning"><span>◫</span> 学习专题</button>
       <button class="nav-item" data-tab="showcase"><span>◈</span> 收藏橱窗</button>
       <button class="nav-item" data-tab="discover"><span>✧</span> 发现同频</button>
       <button class="nav-item" data-tab="friends"><span>♡</span> 好友与消息</button>
@@ -24,7 +25,7 @@
     </nav>
     <div class="sidebar-footer">
       <p><span class="status-dot"></span> 本地优先 · 默认私密</p>
-      <a href="/#topics">返回原 BFC 专题工作台 ↗</a>
+      <a href="/studio.html#topics">返回原 BFC 专题工作台 ↗</a>
     </div>
   </aside>
   <main class="main-area">
@@ -39,10 +40,11 @@
           <span class="eyebrow">YOUR OWN DIGITAL COLLECTION</span>
           <h2>把喜欢的内容，<br>变成属于你的世界。</h2>
           <p>先把收藏带回本地，再决定哪些值得分享。你的私人笔记、原始收藏夹和学习记录不会自动上传。</p>
-          <div class="hero-actions"><button class="button button-primary" id="import-trigger">导入本地收藏</button><button class="button button-soft" id="export-trigger">导出备份</button></div>
+          <div class="hero-actions"><button class="button button-primary" id="import-trigger">导入 JSON 备份</button><button class="button button-soft" id="import-bfc-local">从本机 BFC 一键导入</button><button class="button button-soft" id="export-trigger">导出备份</button></div>
         </div>
         <div class="hero-art" aria-hidden="true"><div class="art-orbit orbit-a"></div><div class="art-orbit orbit-b"></div><div class="art-center">◈</div><div class="art-pill p1">AI 创作</div><div class="art-pill p2">电影学习</div><div class="art-pill p3">编程</div></div>
       </div>
+      <p class="local-bridge-status" id="local-bridge-status">数据仅在你的浏览器中保存。需要时可从本机 BFC 4198 手动导入，不会自动扫描 B站。</p>
       <div class="stats">
         <article><span>我的本地视频</span><strong id="stat-count">0</strong><small>只保存在本浏览器</small></article>
         <article><span>收藏专题标签</span><strong id="stat-topics">0</strong><small>可多标签组织</small></article>
@@ -53,9 +55,19 @@
       <div class="video-grid" id="library-list"></div>
       <div class="pager"><span id="library-page-label"></span><button class="button button-soft" id="page-prev">上一页</button><button class="button button-soft" id="page-next">下一页</button></div>
     </section>
+    <section class="panel-section" id="tab-learning" hidden>
+      <div class="section-heading"><div><span class="overline">YOUR LEARNING TRACKS</span><h3>我的学习专题</h3><p>沿用导入的 BFC 专题，或按本地标签生成学习列表。完成状态仅由你手动标记，不代表 B站播放记录。</p></div></div>
+      <div class="privacy-tip">学习进度和私人笔记仅保存在当前浏览器；更换设备前请导出 JSON 备份。</div>
+      <div id="learning-list" class="learning-grid"></div>
+      <div class="section-heading"><div><span class="overline">TOGETHER, WITH CONSENT</span><h3>结伴学习</h3>
+        <p>从「好友与消息」向好友发起共学邀请，双方同意后追踪 1–5 个共同目标；不会公开你个人的完整收藏或私人笔记。</p>
+      </div></div>
+      <div id="study-plans" class="learning-grid"></div>
+    </section>
     <section class="panel-section" id="tab-showcase" hidden>
-      <div class="section-heading"><div><span class="overline">PICKED BY YOU</span><h3>我的收藏橱窗</h3><p>只发布你主动选择的最多 20 个视频；仅上传视频标题、BV号、公开标签和介绍，不上传私人笔记。</p></div><button class="button button-primary" id="publish-showcase">确认发布橱窗</button></div>
+      <div class="section-heading"><div><span class="overline">PICKED BY YOU</span><h3>我的收藏橱窗</h3><p>只发布你主动选择的最多 20 个视频；仅上传视频标题、BV号、公开标签和介绍，不上传私人笔记。</p></div><div class="showcase-actions"><button class="button button-soft" id="unpublish-showcase">撤下全部公开收藏</button><button class="button button-primary" id="publish-showcase">确认发布橱窗</button></div></div>
       <div class="privacy-tip"><strong>公开前确认：</strong>橱窗草稿只保存在本地。登录后点击“确认发布橱窗”才会上传所选内容。即使发布了橱窗，个人资料默认仍不允许被其他人发现，需另外打开“允许发现我”。</div>
+      <p id="published-summary" class="local-bridge-status">尚未公开任何内容</p>
       <div id="showcase-list" class="video-grid"></div>
     </section>
     <section class="panel-section" id="tab-discover" hidden>
@@ -63,7 +75,7 @@
       <div id="discover-list" class="people-grid"></div>
     </section>
     <section class="panel-section" id="tab-friends" hidden>
-      <div class="section-heading"><div><span class="overline">CONNECTIONS</span><h3>好友与消息</h3><p>只有对方接受交友申请后才能聊天。可随时拉黑、举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
+      <div class="section-heading"><div><span class="overline">CONNECTIONS</span><h3>好友与消息 <span id="pending-count" class="pending-count" hidden></span></h3><p>只有对方接受交友申请后才能聊天。可随时拉黑、举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
       <div id="friends-list" class="people-grid"></div>
       <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><div id="chat-list" class="chat-list"></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
     </section>
@@ -73,7 +85,7 @@
         <div class="auth-tabs"><button id="auth-mode-register" class="active">注册</button><button id="auth-mode-login">登录</button></div>
         <form id="auth-form" class="stacked-form">
           <label>用户名（英文、数字或下划线）<input name="handle" required minlength="3" maxlength="20" autocomplete="username" pattern="[a-z0-9_]{3,20}"></label>
-          <label>邀请码（私有测试部署时必填）<input name="inviteCode" maxlength="64" autocomplete="off" placeholder="管理员提供的一次性邀请码"></label>
+          <label id="invite-field">邀请码（私有测试部署时必填）<input name="inviteCode" maxlength="64" autocomplete="off" placeholder="管理员提供的一次性邀请码"></label>
           <label id="display-name-field">显示名称<input name="displayName" maxlength="30"></label>
           <label>密码（至少 12 位）<input name="password" required minlength="12" maxlength="128" type="password" autocomplete="new-password"></label>
           <label id="adult-field" class="check-label"><input name="adult" type="checkbox"> 我已年满 18 岁，且同意 <a href="/tongpin/terms.html" target="_blank">使用条款与隐私说明</a></label>
@@ -90,6 +102,12 @@
           <p class="small-copy">关闭发现不会删除已发布的橱窗。发布橱窗仍可能被曾经获得内容的人保存；不要公开敏感信息。</p>
           <button class="button button-primary">保存公开资料设置</button>
         </form>
+        <form id="password-form" class="stacked-form password-form">
+          <h4>账户安全 · 修改密码</h4>
+          <label>当前密码<input name="currentPassword" type="password" minlength="12" required autocomplete="current-password"></label>
+          <label>新密码（至少12位）<input name="newPassword" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
+          <button class="button button-soft">修改密码并退出其他设备</button>
+        </form>
         <div class="danger-actions"><button class="button button-soft" id="export-social">导出社交数据</button><button class="button button-soft" id="logout">退出登录</button><button class="button button-danger" id="delete-account">永久删除社交账户</button></div>
         <h4>已拉黑用户</h4><div id="blocked-list" class="blocked-list"></div>
       </div>
@@ -99,5 +117,24 @@
 </div>
 <input id="import-file" type="file" accept="application/json,.json" hidden>
 <dialog id="add-dialog" class="modal"><form id="add-form" class="stacked-form"><h3>添加私人视频</h3><label>BV号或 B站视频链接<input name="bvid" required placeholder="BVxxxxxxxxxx"></label><label>标题<input name="title" maxlength="150" required></label><label>标签（逗号分隔）<input name="tags" placeholder="AI, 教程"></label><label>私人笔记<textarea name="notes" rows="4" maxlength="4000"></textarea></label><div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-add">取消</button><button class="button button-primary">保存到本地</button></div></form></dialog>
+<dialog id="study-dialog" class="modal"><form id="study-form" class="stacked-form">
+  <h3 id="study-dialog-title">邀请好友一起学习</h3>
+  <p class="small-copy">只有双方同意，才能共享你在这里填写的学习主题和进度；不上传个人收藏清单。</p>
+  <label>共同学习主题<input name="topic" maxlength="80" required placeholder="例如：用 AI 做一部短片"></label>
+  <label>共同目标（每行一个，最多 5 个）<textarea name="goals" rows="5" required placeholder="确定短片主题&#10;写出分镜脚本&#10;制作并分享成品"></textarea></label>
+  <div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-study">取消</button><button class="button button-primary">发送共学邀请</button></div>
+</form></dialog>
+<dialog id="report-dialog" class="modal"><form id="report-form" class="stacked-form">
+  <h3>举报不当行为</h3>
+  <p class="small-copy">请选择最符合的问题。举报记录将进入人工审核队列，无法保证即时处理。</p>
+  <label>举报原因<select name="reason" required>
+    <option value="harassment">骚扰或威胁</option>
+    <option value="spam">垃圾广告或营销</option>
+    <option value="privacy">隐私侵害</option>
+    <option value="other">其他问题</option>
+  </select></label>
+  <label>补充说明<textarea name="details" maxlength="300" rows="4" placeholder="请客观描述具体行为（选填）"></textarea></label>
+  <div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-report">取消</button><button class="button button-primary">提交举报</button></div>
+</form></dialog>
 <script type="module" src="/tongpin/app.js"></script>
 </body></html>
