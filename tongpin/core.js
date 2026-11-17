@@ -87,8 +87,14 @@ export function normalizeImported(payload) {
     const originalFolders = pick(row.sourceFolders, row.folders, row.originalFolders, base.originalFolders, []);
     const noteValue = pick(notes[bvid], row.notes, row.note, base.note, "");
     const note = typeof noteValue === "string" ? noteValue : cleanText(noteValue?.text, 4000);
-    const oldProgress = progress[bvid] || row.progress || {};
-    const isWatched = Boolean(watched[bvid] || row.watched || oldProgress?.completed);
+    // The portable v3 archive stores progress as a number; old BFC backups use {percent,completed}.
+    const oldProgress = progress[bvid] ?? row.progress ?? null;
+    const progressNumber = typeof oldProgress === "number" ? oldProgress :
+      oldProgress && typeof oldProgress === "object" ? oldProgress.percent : null;
+    const hasProgress = progressNumber !== null && progressNumber !== undefined &&
+      progressNumber !== "" && Number.isFinite(Number(progressNumber));
+    const isWatched = Boolean(watched[bvid] || row.watched ||
+      (oldProgress && typeof oldProgress === "object" && oldProgress.completed));
     const value = {
       bvid, title, metadataMissing: isPlaceholder,
       author: cleanText(pick(row.author, row.owner?.name, row.upper, base.author, ""), 60),
@@ -96,8 +102,8 @@ export function normalizeImported(payload) {
       topics: [...new Set(topicLabels.map(x=>cleanText(x,80)).filter(Boolean))].slice(0,12),
       notes: cleanText(note, 4000),
       sourceFolders: [...new Set(shortList(originalFolders).map(x=>cleanText(x,80)).filter(Boolean))].slice(0,30),
-      watched: isWatched, progress: Number.isFinite(Number(oldProgress?.percent)) ?
-        Math.max(0, Math.min(100, Number(oldProgress.percent))) : null,
+      watched: isWatched, progress: hasProgress ?
+        Math.max(0, Math.min(100, Number(progressNumber))) : null,
       url: videoUrl(bvid)
     };
     const prior = byId.get(bvid);
@@ -107,6 +113,7 @@ export function normalizeImported(payload) {
     prior.topics = mergeUnique(prior.topics, value.topics, 12);
     prior.sourceFolders = mergeUnique(prior.sourceFolders, value.sourceFolders, 30);
     prior.watched ||= value.watched;
+    if (prior.progress === null && value.progress !== null) prior.progress = value.progress;
     if (prior.metadataMissing && !value.metadataMissing) {
       prior.title = value.title; prior.metadataMissing = false;
     }

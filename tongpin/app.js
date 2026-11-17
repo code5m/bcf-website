@@ -486,7 +486,7 @@ async function persistVideo(input) {
   if(!title)throw new Error("请填写视频标题");
   const previous=state.items.find(x=>x.bvid===bvid);
   await txPutMany("videos",[{
-    ...previous,bvid,title,author:previous?.author||"",
+    ...previous,bvid,title,metadataMissing:false,author:previous?.author||"",
     tags:cleanTopics(input.tags,12),notes:String(input.notes||"").slice(0,4000),
     sourceFolders:previous?.sourceFolders||[],url:"https://www.bilibili.com/video/"+bvid,
     updatedAt:new Date().toISOString()
@@ -563,6 +563,9 @@ async function actionHandler(event) {
           sections:Object.fromEntries(Object.entries(topic.sections||{}).filter(([bvid])=>bvid!==id))
         }));
         settings.put({key:"topics",value:topics});
+        // A deliberate user deletion wins over any older import-undo snapshot.
+        // Otherwise "undo" could silently resurrect records and private notes.
+        settings.delete("lastImportUndo");
         tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
       });
       await refreshLocal();

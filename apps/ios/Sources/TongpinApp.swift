@@ -63,7 +63,9 @@ struct CuratedVideo: Codable {
     var title:String
     var tags:[String]
     var caption:String
-    var url:String
+    // Web creates locally curated drafts without url. Reconstruct it from bvid on use.
+    // A missing URL must never make the entire portable archive fail to decode.
+    var url:String?
 }
 struct PortableArchive: Codable {
     var type: String = "tongpin_private_library"
@@ -96,10 +98,17 @@ struct PortableArchive: Codable {
         try data.write(to:dataURL,options:[.atomic,.completeFileProtectionUnlessOpen])
     }
     func save(_ item:SavedVideo) throws {
+        let existing=videos.first{$0.bvid==item.bvid}
+        let tags=Array(Set((existing?.tags ?? [])+item.tags)).sorted()
         let cleaned=SavedVideo(bvid:item.bvid,title:String(item.title.prefix(150)),
-            tags:Array(item.tags.prefix(12)),notes:String(item.notes.prefix(4000)),
-            author:item.author,topics:item.topics,sourceFolders:item.sourceFolders,
-            watched:item.watched,progress:item.progress,metadataMissing:item.metadataMissing)
+            tags:Array(tags.prefix(12)),
+            notes:String((item.notes.isEmpty ? (existing?.notes ?? "") : item.notes).prefix(4000)),
+            author:existing?.author ?? item.author,
+            topics:existing?.topics ?? item.topics,
+            sourceFolders:existing?.sourceFolders ?? item.sourceFolders,
+            watched:existing?.watched ?? item.watched,
+            progress:existing?.progress ?? item.progress,
+            metadataMissing:false)
         var next=videos.filter{$0.bvid != item.bvid}
         next.insert(cleaned,at:0)
         try persist(PortableArchive(videos:next,topics:topics,showcaseDraft:drafts))
@@ -162,7 +171,8 @@ struct PortableArchive: Codable {
             newTopics.append(item)
             for id in items{group[id,default:[]].append(name)}
         }
-        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        var byID:[String:SavedVideo]=[:]
+        for item in videos {byID[item.bvid]=item}
         let additional=Set(group.keys).union(categories.keys).union(notes.keys).union(watched.keys)
         let combined=rows+additional.map{["bvid":$0]}
         for row in combined{
@@ -201,7 +211,8 @@ struct PortableArchive: Codable {
         return rows.count
     }
     private func merge(_ archive:PortableArchive)throws{
-        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        var byID:[String:SavedVideo]=[:]
+        for item in videos {byID[item.bvid]=item}
         for item in archive.videos{
             guard Self.parseBV(item.bvid)==item.bvid else{continue}
             if let previous=byID[item.bvid]{
@@ -213,6 +224,7 @@ struct PortableArchive: Codable {
                 merged.topics=Array(Set(previous.topics+item.topics)).sorted()
                 merged.sourceFolders=Array(Set(previous.sourceFolders+item.sourceFolders)).sorted()
                 merged.watched=previous.watched||item.watched
+                if let incoming=item.progress { merged.progress=incoming }
                 if merged.notes.isEmpty{merged.notes=item.notes}
                 byID[item.bvid]=merged
             }else{byID[item.bvid]=item}
