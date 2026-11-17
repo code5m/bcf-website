@@ -90,7 +90,8 @@ function connected(db, a, b) {
     (c.from === a && c.to === b || c.from === b && c.to === a)));
 }
 function visiblePeer(db, user, peer) {
-  return user.id !== peer.id && !peersBlocked(user, peer) && peer.profile.discoverable && peer.showcase.length > 0;
+  return user.id !== peer.id && !peersBlocked(user, peer) && peer.profile.discoverable && peer.showcase.length > 0 &&
+    !(peer.suspendedUntil && new Date(peer.suspendedUntil).getTime()>Date.now());
 }
 function verifyAdmin(req) {
   const token=process.env.TONGPIN_ADMIN_TOKEN || "";
@@ -123,8 +124,17 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
     return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
-    const forwarded=process.env.TONGPIN_TRUST_PROXY === "1" ? String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
-    const ip = forwarded || String(req.socket.remoteAddress || "local");
+    const remote=String(req.socket.remoteAddress || "local");
+    const forwarded=process.env.TONGPIN_TRUST_PROXY === "1" ?
+      String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
+    const ip=/^[a-fA-F0-9.:]{3,45}$/.test(forwarded) ? forwarded : remote;
+    // Keep bounded in long-running, invite-only deployments.
+    if(rate.size>3000){
+      for(const [key,history] of rate) {
+        if(!history.some(x=>x> Date.now()-3600000))rate.delete(key);
+        if(rate.size<=2500)break;
+      }
+    }
     const key = group + ":" + ip;
     const now = Date.now();
     const current = (rate.get(key) || []).filter(x => x > now - windowMs);
@@ -196,6 +206,23 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         let user = null;
         try { user = auth(db, req, {allowSuspended:true}); } catch {}
         json(res, 200, {user: user ? ownProfile(user) : null});
+        return true;
+      }
+      if (method === "PUT" && path === "/account/password") {
+        limit(req,"password-change",8,3600000);
+        const input=await methodBody(req);
+        const current=String(input.currentPassword || "");
+        const next=String(input.newPassword || "");
+        if(next.length<12 || next.length>128 || next===current) fail(400,"invalid_new_password");
+        await transaction(db=>{
+          const me=auth(db,req);
+          if(!passwordValid(current,me.passwordHash))fail(403,"invalid_password");
+          me.passwordHash=passwordHash(next);
+          const key=cookieToken(req);
+          db.sessions=db.sessions.filter(s=>s.userId!==me.id || key && s.key===sha(key));
+          return true;
+        });
+        json(res,200,{ok:true,otherSessionsRevoked:true});
         return true;
       }
       if (method === "GET" && path === "/account/export") {
@@ -295,12 +322,14 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return true;
       }
       if (method === "GET" && path === "/people") {
+        limit(req, "discovery", 60, 60000);
         const db = await read();
         const me = auth(db, req);
         const people = db.users.filter(u => visiblePeer(db, me, u)).map(user => ({
           ...publicProfile(user), match: matchPublic(me, user),
           relationship: connection(db, me.id, user.id)?.status || "none"
-        })).sort((a,b) => b.match.score - a.match.score || a.handle.localeCompare(b.handle)).slice(0, 100);
+        })).filter(person=>person.match.score>0 || person.relationship==="accepted")
+          .sort((a,b) => b.match.score - a.match.score || a.handle.localeCompare(b.handle)).slice(0, 100);
         json(res, 200, {people});
         return true;
       }
@@ -320,6 +349,10 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           const me = auth(db, req), target = byId(db, input.targetId);
           if (!visiblePeer(db, me, target)) fail(403, "peer_not_discoverable");
           if (connection(db, me.id, target.id)) fail(409, "request_exists");
+          if (db.connections.some(c=>c.from===me.id && c.to===target.id &&
+              c.status==="declined" && Date.now()-new Date(c.createdAt).getTime()<7*86400000)) {
+            fail(429,"recent_declined_request");
+          }
           const id = randomUUID();
           db.connections.push({id, from: me.id, to: target.id, status: "pending", createdAt: new Date().toISOString()});
           return id;
@@ -364,6 +397,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return true;
       }
       if (method === "GET" && path === "/messages") {
+        limit(req, "message-read", 80, 60000);
         const db = await read();
         const me = auth(db, req);
         const peer = byId(db, url.searchParams.get("peer"));

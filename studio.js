@@ -131,4 +131,4 @@ fetch('/api/session').then(r=>r.json()).then(session=>{sessionToken=session.toke
  }
  menus();refreshCategoryTopics(state,rows);save();navigate();updateOverview();
  return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
-}).catch(e=>{data={};rows=[['BV1demo001','英语表达入门：从听懂到开口','英语'],['BV1demo002','建立自己的 AI 学习路径','AI'],['BV1demo003','如何把收藏整理成专题','效率']].map(([bvid,title,topic])=>({bvid,title,topic,confidence:'medium',reason:'Web 体验示例'}));state.initialized=true;for(const topic of [...new Set(rows.map(category))])state.topics.push({id:topic,name:topic+' · 精选',description:'把感兴趣的内容编成自己的观看路径。',chapters:['入门','进阶'],sections:{},items:rows.filter(r=>category(r)===topic).map(r=>r.bvid)});$('message').textContent='Web 体验预览 · 已加载示例内容';navigate();updateOverview();});
+}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198）。没有加载虚构视频；请前往「同频」选择本机导入或手动 JSON 导入。';navigate();});

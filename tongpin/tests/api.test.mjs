@@ -171,3 +171,39 @@ test("rejects huge imports and does not invent invalid BV identities",()=>{
   assert.throws(()=>normalizeImported({videos:Array.from({length:30001},()=>({bvid:"BV1234567890"}))}),/limit/);
   assert.equal(normalizeImported({videos:[{id:"invalid"}]}).items.length,0);
 });
+
+test("password rotation keeps current session but revokes all other sessions",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-password-"));
+  const route=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>route(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
+  const base="http://127.0.0.1:"+server.address().port;
+  async function req(path,method,data,cookie){
+    const r=await fetch(base+"/api/social"+path,{
+      method,headers:{"Origin":base,"Content-Type":"application/json","X-Tongpin-Request":"1",...(cookie?{Cookie:cookie}:{})},
+      body:data===undefined?undefined:JSON.stringify(data)
+    });
+    return {status:r.status,body:await r.json(),cookie:(r.headers.get("set-cookie")||"").split(";")[0]};
+  }
+  try{
+    const created=await req("/register","POST",{handle:"password_user",password:"old-strong-password",adult:true,acceptTerms:true});
+    assert.equal(created.status,201);
+    const other=await req("/login","POST",{handle:"password_user",password:"old-strong-password"});
+    assert.equal(other.status,200);
+    assert.notEqual(created.cookie,other.cookie);
+    assert.equal((await req("/account/password","PUT",{currentPassword:"wrongpassword",newPassword:"new-strong-pass"},created.cookie)).status,403);
+    const changed=await req("/account/password","PUT",{currentPassword:"old-strong-password",newPassword:"new-strong-pass"},created.cookie);
+    assert.equal(changed.status,200);
+    assert.equal((await req("/people","GET",undefined,other.cookie)).status,401);
+    assert.equal((await req("/people","GET",undefined,created.cookie)).status,200);
+    assert.equal((await req("/login","POST",{handle:"password_user",password:"old-strong-password"})).status,401);
+    assert.equal((await req("/login","POST",{handle:"password_user",password:"new-strong-pass"})).status,200);
+  }finally{
+    await new Promise(ok=>server.close(ok));
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+test("match excludes unrelated profiles by default, even when they are discoverable",()=>{
+  assert.equal(matchPublic({showcase:[{bvid:"BV1234567890"}],profile:{topics:["电影"]}},
+    {showcase:[{bvid:"BV0987654321"}],profile:{topics:["英语"]}}).score,0);
+});
