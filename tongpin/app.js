@@ -424,37 +424,94 @@ function renderAuthMode() {
   $("auth-submit").textContent=register?"创建账号":"登录";
   $("auth-form").elements.password.autocomplete=register?"new-password":"current-password";
 }
-function renderPeople() {
-  $("discover-list").innerHTML=!state.user?empty("登录后才能发现同频的人","你的私人收藏始终不会被同步用于推荐。")
-  :state.people.length?state.people.map(u=>{
+function renderPeople(){
+  const target=$("discover-list");
+  if(!state.user){
+    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">♡</div>'+
+      '<span class="overline">START WITH A REAL PROFILE</span>'+
+      '<h4>先介绍自己，再遇见喜欢同样内容的人。</h4>'+
+      '<p>不需要上传私人收藏。注册后选择想公开的几条视频、填写兴趣并开启被发现，真实的同好才会出现在这里。</p>'+
+      '<button class="button button-primary" data-action="login">登录 / 创建我的资料</button></div>';
+    return;
+  }
+  if(!state.people.length){
+    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">✧</div>'+
+      '<span class="overline">NO FAKE MATCHES</span><h4>这里暂时还没有合适的同好。</h4>'+
+      '<p>不会用机器人或虚构头像填满列表。试着主动公开几条有代表性的视频，并在「我的」资料里开启被发现。</p>'+
+      '<div class="card-actions"><button class="button button-primary" data-action="showcase">分享我的精选</button>'+
+      '<button class="button button-soft" data-action="login">完善个人资料</button></div></div>';
+    return;
+  }
+  target.innerHTML=state.people.map((u,index)=>{
     const match=u.match||{sharedVideos:[],sharedTags:[],sharedTopics:[],score:0};
-    return '<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml((u.displayName||"?").slice(0,1))+'</div>'+
-      '<div><h4>'+escapeHtml(u.displayName)+'</h4><span class="match-score">'+
-      match.score+' 分 · 共同公开视频 '+match.sharedVideos.length+' 条</span></div></div>'+
-      '<p>@'+escapeHtml(u.handle)+(u.city?" · "+escapeHtml(u.city):"")+'</p><p>'+escapeHtml(u.bio||"这个人还没有填写简介")+'</p>'+
-      '<div class="tags">'+tagsHtml(match.sharedTopics.concat(match.sharedTags))+'</div>'+
-      '<p>精选收藏：'+escapeHtml(u.showcase.map(s=>s.title).slice(0,3).join(" · "))+'</p>'+
-      '<div class="card-actions"><button class="highlight" data-action="request" data-id="'+u.id+'"'+(u.relationship!=="none"?" disabled":"")+'>'+
-      (u.relationship==="none"?"申请交友":u.relationship==="accepted"?"已是好友":"已申请")+'</button>'+
-      '<button data-action="report" data-id="'+u.id+'">举报</button><button data-action="block" data-id="'+u.id+'">拉黑</button></div></article>';
-  }).join(""):empty("暂时没有可发现的人","其他用户需要主动公开收藏并开启被发现功能。这里不会创建虚拟匹配对象。");
+    const common=[...new Set([...(match.sharedTopics||[]),...(match.sharedTags||[])])];
+    const shared=(match.sharedVideos||[])[0];
+    const sharedTitle=shared?u.showcase?.find(video=>video.bvid===shared)?.title:"";
+    const reason=sharedTitle?"你们都分享过《"+sharedTitle+"》":
+      common.length?"你们都喜欢 "+common.slice(0,2).join("、"):
+      "喜欢的公开视频有交集";
+    const sharedVideos=(match.sharedVideos||[]).length;
+    const title=escapeHtml(u.displayName||u.handle||"用户");
+    const first=title.slice(0,1);
+    const primary=u.relationship==="accepted"?
+      '<button class="highlight" data-action="chat" data-id="'+u.id+'" data-name="'+title+'">♡ 去聊天 →</button>':
+      '<button class="highlight" data-action="request" data-id="'+u.id+'"'+
+      (u.relationship!=="none"?" disabled":"")+'>'+
+      (u.relationship==="none"?"♡ 申请认识":u.relationship==="accepted"?"已经是好友":"已发送申请")+'</button>';
+    return '<article class="person-card meet-card"><div class="meet-card-banner '+posterTheme(u.id)+'">'+
+      '<span class="meet-number">同好发现 / '+String(index+1).padStart(2,"0")+'</span>'+
+      '<span class="meet-quote">“'+escapeHtml(reason)+'”</span>'+
+      '<span class="meet-common">✦ '+sharedVideos+' 条共同分享的视频 · '+common.length+' 个共同话题</span></div>'+
+      '<div class="meet-card-body"><div class="person-header"><div class="avatar social-avatar">'+first+'</div>'+
+      '<div class="meet-identity"><h4>'+title+'</h4><span>@'+escapeHtml(u.handle)+
+      (u.city?' · '+escapeHtml(u.city):"")+'</span></div><span class="meet-heart" aria-hidden="true">♡</span></div>'+
+      '<p class="meet-bio">'+escapeHtml(u.bio||"很高兴在这里遇见喜欢相似视频的人。")+'</p>'+
+      '<div class="tags">'+tagsHtml(common)+'</div>'+
+      '<details class="public-picks"><summary>看看 TA 主动分享的视频</summary><ul>'+
+      (u.showcase||[]).slice(0,5).map(x=>'<li><a href="https://www.bilibili.com/video/'+
+        encodeURIComponent(x.bvid)+'" target="_blank" rel="noopener noreferrer">'+
+        escapeHtml(x.title)+'</a></li>').join("")+'</ul></details>'+
+      '<div class="card-actions meet-actions">'+primary+'</div>'+
+      '<details class="safety-options"><summary>更多 · 隐私与安全</summary>'+
+      '<button data-action="report" data-id="'+u.id+'">举报</button>'+
+      '<button data-action="block" data-id="'+u.id+'">拉黑</button></details></div></article>';
+  }).join("");
 }
-function renderConnections() {
+function renderConnections(){
   const connections=state.connections;
   const incoming=connections.filter(c=>c.status==="pending" && c.direction==="incoming").length;
   $("pending-count").hidden=incoming===0;
   $("pending-count").textContent=String(incoming);
-  $("friends-list").innerHTML=!state.user?empty("请先登录","只有双方同意才能建立联系。"):connections.length?
-    connections.map(c=>'<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml(c.peer.displayName.slice(0,1))+'</div><div><h4>'+
-      escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
-      '<p>'+ (c.status==="accepted"?"已成为好友":c.direction==="incoming"?"对方向你发来交友申请":"等待对方接受申请")+'</p><div class="card-actions">'+
-      (c.status==="pending"&&c.direction==="incoming"?'<button class="highlight" data-action="accept" data-id="'+c.id+'">同意</button><button data-action="decline" data-id="'+c.id+'">拒绝</button>':"")+
-      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button>'+
-      '<button data-action="study" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">结伴学习</button>'+
-      '<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
-      '<button data-action="block" data-id="'+c.peer.id+'">拉黑</button><button data-action="report" data-id="'+c.peer.id+'">举报</button></div></article>').join("")
-    :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
-  $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
+  if(!state.user){
+    $("friends-list").innerHTML=empty("登录后，这里才是你们的对话","只有双方同意才能发消息。私人片单可以继续离线使用。");
+  }else if(!connections.length){
+    $("friends-list").innerHTML='<div class="meet-empty message-empty"><span class="meet-empty-symbol">✉</span>'+
+      '<span class="overline">MAKE THE FIRST CONNECTION</span><h4>还没有新的对话。</h4>'+
+      '<p>去遇见页面，找到有共同视频或兴趣的人，发一条友善的交友申请。只有对方同意后才能聊天。</p>'+
+      '<button class="button button-primary" data-action="discover">去遇见同好 →</button></div>';
+  }else{
+    $("friends-list").innerHTML=connections.map(c=>{
+      const peer=c.peer||{},display=escapeHtml(peer.displayName||peer.handle||"朋友");
+      const info=c.status==="accepted"?"你们已成为好友 · 可以聊天与结伴学习":
+        c.direction==="incoming"?"TA 向你发来了交友申请":"已发出申请，等待对方同意";
+      return '<article class="person-card connection-card"><div class="person-header">'+
+        '<div class="avatar social-avatar">'+display.slice(0,1)+'</div><div class="meet-identity"><h4>'+
+        display+'</h4><span>@'+escapeHtml(peer.handle||"")+'</span><p>'+info+'</p></div></div>'+
+        '<div class="card-actions connection-actions">'+
+        (c.status==="pending"&&c.direction==="incoming"?
+          '<button class="highlight" data-action="accept" data-id="'+c.id+'">♡ 接受申请</button>'+
+          '<button data-action="decline" data-id="'+c.id+'">暂不接受</button>':"")+
+        (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+peer.id+
+          '" data-name="'+display+'">✉ 开始聊天</button>'+
+          '<button data-action="study" data-id="'+peer.id+'" data-name="'+display+'">◫ 结伴共学</button>':"")+
+        '</div><details class="safety-options"><summary>关系管理</summary>'+
+        (c.status==="accepted"?'<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
+        '<button data-action="block" data-id="'+peer.id+'">拉黑</button>'+
+        '<button data-action="report" data-id="'+peer.id+'">举报</button></details></article>';
+    }).join("");
+  }
+  $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+
+    ' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
 }
 function clearSocialSession(){
   state.sessionEpoch++;
@@ -474,9 +531,10 @@ function renderChat() {
   $("chat-panel").hidden=!state.chatPeer;
   if(!state.chatPeer)return;
   $("chat-heading").textContent="与 "+state.chatPeer.name+" 的对话";
-  $("chat-list").innerHTML=state.chatMessages.map(m=>
+  $("chat-list").innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
-    '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join("");
+    '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join(""):
+    '<div class="chat-welcome">✦ 还没有消息。聊聊最近看到的好视频吧，第一句话由你决定。</div>';
   $("load-older").hidden=!state.messageCursor;
   $("chat-list").scrollTop=$("chat-list").scrollHeight;
 }
@@ -592,6 +650,10 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
+    if(action==="import"){$("import-file").click();return;}
+    if(action==="discover"){setTab("discover");return;}
+    if(action==="showcase"){setTab("showcase");return;}
+    if(action==="login"){setTab("account");return;}
     if(action==="toggle")return await updateShowcaseDraft(id);
     if(action==="watched"){
       const item=state.items.find(x=>x.bvid===id);
@@ -659,7 +721,9 @@ async function actionHandler(event) {
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
+      setTab("friends");
       await openChat({id,name:button.dataset.name});
+      $("chat-panel").scrollIntoView({behavior:"smooth",block:"nearest"});
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
       await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
@@ -679,6 +743,23 @@ async function actionHandler(event) {
 function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
+  for(const id of ["discover-from-hero","feed-meet-cta","feed-connection-cta"]){
+    $(id).onclick=()=>setTab("discover");
+  }
+  $("meet-profile-cta").onclick=()=>setTab("account");
+  $("feed-channels").addEventListener("click",event=>{
+    const button=event.target.closest("button[data-feed-tag]");
+    if(!button)return;
+    state.feedTag=button.dataset.feedTag;
+    state.page=1;
+    renderLocal();
+  });
+  document.querySelectorAll("button[data-chat-prompt]").forEach(button=>{
+    button.onclick=()=>{
+      $("chat-text").value=button.dataset.chatPrompt;
+      $("chat-text").focus();
+    };
+  });
   $("import-trigger").onclick=()=>$("import-file").click();
   $("import-bfc-local").onclick=async()=>{
     const button=$("import-bfc-local");
