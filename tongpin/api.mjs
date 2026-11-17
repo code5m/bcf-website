@@ -153,8 +153,13 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       if (method !== "GET") writeAllowed(req);
       if (method === "GET" && path === "/health") {
         try{
-          store.health();
-          json(res,200,{ok:true,storage:"sqlite-writable",externalBilibiliRequests:0});
+          // Only local container probes write SQLite. Public GET requests cannot
+          // be turned into a repeated write-amplification attack.
+          const remote=String(req.socket.remoteAddress||"");
+          const local=/^(127\.|::1$|::ffff:127\.)/.test(remote);
+          if(local)store.health();
+          else store.db.prepare("SELECT 1 FROM schema_meta LIMIT 1").get();
+          json(res,200,{ok:true,storage:local?"sqlite-writable":"sqlite-readable",externalBilibiliRequests:0});
         }catch(error){
           console.error("[tongpin health]",error?.message||"storage_failure");
           json(res,503,{ok:false,error:"storage_unavailable"});
