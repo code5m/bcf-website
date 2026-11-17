@@ -1,10 +1,19 @@
 import {test,expect} from "@playwright/test";
+
+async function goTo(page,tab){
+  if(tab==="showcase"||tab==="learning"){
+    await page.locator("#nav [data-tab=account]").click();
+    await page.locator(tab==="showcase"?"#shortcut-showcase":"#shortcut-learning").click();
+  }else await page.locator('#nav [data-tab="'+tab+'"]').click();
+}
+
 test("desktop and narrow-mobile layouts preserve navigation and prevent horizontal overflow",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
   await page.setViewportSize({width:1440,height:900});
   await page.goto("/tongpin/");
   await expect(page.locator("#page-title")).toHaveText("刷视频");
   await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
+  await expect(page.locator("#nav .nav-item")).toHaveCount(4);
   await expect(page.locator("#nav [data-tab=discover]")).toBeVisible();
   const backup={type:"tongpin_private_library",version:2,videos:[
     {bvid:"BV1234567890",title:"AI 电影制作从入门到实践（界面演示）",tags:["AI","电影"],notes:"只在本机的示例笔记"},
@@ -46,9 +55,9 @@ test("desktop and narrow-mobile layouts preserve navigation and prevent horizont
   await page.locator("#nav [data-tab=discover]").click();
   await expect(page.locator("#meet-profile-cta")).toBeVisible();
   await expect(page.locator("#discover-list")).toContainText("登录");
-  await page.locator("#nav [data-tab=learning]").click();
+  await goTo(page,"learning");
   await expect(page.locator("#tab-learning")).toBeVisible();
-  await page.locator("#nav [data-tab=showcase]").click();
+  await goTo(page,"showcase");
   await expect(page.locator("#tab-showcase")).toBeVisible();
   await page.locator("#nav [data-tab=library]").click();
   await page.screenshot({path:"test-results/tongpin-mobile-library.png",fullPage:true});

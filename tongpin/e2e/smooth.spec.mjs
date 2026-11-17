@@ -1,5 +1,13 @@
 import {test,expect} from "@playwright/test";
 
+async function goTo(page,tab){
+  if(tab==="showcase"||tab==="learning"){
+    await page.locator("#nav [data-tab=account]").click();
+    await page.locator(tab==="showcase"?"#shortcut-showcase":"#shortcut-learning").click();
+  }else await page.locator('#nav [data-tab="'+tab+'"]').click();
+}
+
+
 // Regression: 1,500 real-shaped private entries must not produce 1,500
 // hidden DOM rows or re-create unrelated panels on every search keystroke.
 test("large private library keeps filtering local, topics incremental and mobile layout compact",async({page})=>{
@@ -24,7 +32,7 @@ test("large private library keeps filtering local, topics incremental and mobile
   await expect(page.locator("#stat-count")).toHaveText("1,500");
   await expect(page.locator("#library-list .video-post-card")).toHaveCount(24);
   await expect(page.locator("#feed-feature .spotlight-video")).toBeVisible();
-  await page.locator("[data-tab=learning]").click();
+  await goTo(page,"learning");
   await expect(page.locator("#learning-list .topic-card")).toHaveCount(2);
   await expect(page.locator("#learning-list .topic-video")).toHaveCount(24);
   await page.locator('#learning-list [data-action="topic-more"][data-index="0"]').click();
@@ -64,6 +72,7 @@ test("cache refresh does not replace unchanged public feed and mobile buttons re
   await page.setViewportSize({width:390,height:844});
   await page.goto("/tongpin/");
   await expect(page.locator("#feed-feature")).toBeVisible();
+  await expect(page.locator("#nav .nav-item")).toHaveCount(4);
   await page.locator("#nav [data-tab=account]").click();
   await page.locator("#nav [data-tab=library]").click();
   await expect(page.locator("#import-trigger")).toBeVisible();
