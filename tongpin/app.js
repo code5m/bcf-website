@@ -282,10 +282,18 @@ function renderLearning() {
       escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
       '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
       '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
-      (selected.length?'<div class="topic-videos">'+selected.slice(0,12).map(v=>'<div class="topic-video">'+
+      (selected.length?'<div class="topic-videos">'+
+        (topic.notes?'<p class="small-copy">专题笔记：'+escapeHtml(topic.notes.slice(0,240))+'</p>':"")+
+        (Array.isArray(topic.chapters)&&topic.chapters.length?'<p class="small-copy">章节：'+topic.chapters.map(escapeHtml).join(" · ")+'</p>':"")+
+        selected.slice(0,12).map(v=>'<div class="topic-video">'+
         '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
-        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
-        (selected.length>12?'<p class="small-copy">本专题共 '+selected.length+' 条；这里只显示前12条。</p>':"")+'</div>':
+        '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid] || "未分章节")+'</small>'+
+        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div></div>').join("")+
+        (selected.length>12?'<details class="topic-overflow"><summary>展开剩余 '+(selected.length-12)+' 条视频</summary>'+
+        selected.slice(12).map(v=>'<div class="topic-video"><button data-action="watched" data-id="'+v.bvid+
+          '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+
+          '</button><a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
+        '</details>':"")+'</div>':
         '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
   }).join("");
 }
@@ -536,9 +544,29 @@ async function actionHandler(event) {
       return;
     }
     if(action==="remove"){
-      if(!confirm("只删除本浏览器的私人视频记录？不会取消 B站收藏。"))return;
-      await txDelete("videos",id);
+      const published=(state.user?.showcase||[]).some(item=>item.bvid===id);
+      if(published && !confirm("该视频还在服务器公开橱窗。删除本地记录前必须先从公开橱窗撤下。是否现在一并撤下？"))return;
+      if(!confirm("确认删除该视频的本地记录与橱窗草稿？此操作不修改 B站上的收藏。"))return;
+      if(published){
+        const next=state.user.showcase.filter(item=>item.bvid!==id);
+        state.user=(await api("/showcase","PUT",{items:next})).user;
+        renderAuth();
+      }
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction(["videos","settings"],"readwrite");
+        const settings=tx.objectStore("settings");
+        tx.objectStore("videos").delete(id);
+        const localDraft=state.showcase.filter(item=>item.bvid!==id);
+        settings.put({key:"showcase",value:localDraft});
+        const topics=state.topics.map(topic=>({
+          ...topic,items:(topic.items||[]).filter(bvid=>bvid!==id),
+          sections:Object.fromEntries(Object.entries(topic.sections||{}).filter(([bvid])=>bvid!==id))
+        }));
+        settings.put({key:"topics",value:topics});
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
       await refreshLocal();
+      notify(published?"已从服务器公开橱窗撤下，并删除本地记录。":"已删除本地记录和草稿。");
       return;
     }
     if(action==="edit"){
