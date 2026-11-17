@@ -56,10 +56,13 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await register(b,"bob_"+suffix,"Bob");
     await publish(b);
     await b.locator("[data-tab=library]").click();
-    await expect(b.locator("#community-list .community-card")).toHaveCount(1);
-    await expect(b.locator("#community-list [data-action=request]")).toBeVisible();
-    await expect(b.locator("#community-list")).toContainText("我也收藏了");
-    await expect(b.locator("#community-list")).toContainText("AI 电影制作入门");
+    // Parallel E2E scenarios can publish other real opt-in cards to the same
+    // test server; assert the relevant video, not a global feed count.
+    const sharedCard=b.locator("#community-list .community-card").filter({hasText:"AI 电影制作入门"});
+    await expect(sharedCard).toHaveCount(1);
+    await expect(sharedCard.locator("[data-action=request]").first()).toBeVisible();
+    await expect(sharedCard).toContainText("我也收藏了");
+    await expect(sharedCard).toContainText("AI 电影制作入门");
     await expect(b.locator("#community-list")).not.toContainText("Alice的内容");
     await a.locator("[data-tab=discover]").click();
     await expect(a.locator("#discover-list")).toContainText("Bob");
