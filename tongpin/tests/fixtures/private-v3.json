@@ -1,0 +1,76 @@
+{
+  "type": "tongpin_private_library",
+  "version": 3,
+  "exportedAt": "2026-11-17T00:00:00.000Z",
+  "videos": [
+    {
+      "bvid": "BV1234567890",
+      "title": "学习 Python 和视频制作",
+      "author": "原创作者",
+      "tags": [
+        "AI",
+        "剪辑"
+      ],
+      "notes": "我的私人笔记，不得公开",
+      "topics": [
+        "电影实战"
+      ],
+      "sourceFolders": [
+        "原收藏夹A"
+      ],
+      "watched": false,
+      "progress": 67.5,
+      "metadataMissing": false,
+      "url": "https://www.bilibili.com/video/BV1234567890"
+    },
+    {
+      "bvid": "BV0987654321",
+      "title": "零基础学后期",
+      "author": "老师",
+      "tags": [
+        "电影"
+      ],
+      "notes": "第二份私密笔记",
+      "topics": [
+        "电影实战"
+      ],
+      "sourceFolders": [
+        "原收藏夹B"
+      ],
+      "watched": true,
+      "progress": 0,
+      "metadataMissing": false,
+      "url": "https://www.bilibili.com/video/BV0987654321"
+    }
+  ],
+  "topics": [
+    {
+      "name": "电影实战",
+      "description": "可恢复的专题",
+      "notes": "整套流程笔记",
+      "chapters": [
+        "构思",
+        "拍摄",
+        "后期"
+      ],
+      "items": [
+        "BV1234567890",
+        "BV0987654321"
+      ],
+      "sections": {
+        "BV1234567890": "构思",
+        "BV0987654321": "后期"
+      }
+    }
+  ],
+  "showcaseDraft": [
+    {
+      "bvid": "BV1234567890",
+      "title": "学习 Python 和视频制作",
+      "tags": [
+        "AI"
+      ],
+      "caption": "来自公开推荐，没有 URL 字段"
+    }
+  ]
+}
