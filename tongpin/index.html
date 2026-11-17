@@ -30,7 +30,7 @@
   <main class="main-area">
     <header class="topbar">
       <div><h1 id="page-title">视频</h1></div>
-      <div class="top-actions"><button class="button button-ghost demo-entry" id="contest-demo-top">体验 APP 演示</button><span id="session-label" class="session-label">离线私人模式</span><button class="button button-ghost" id="login-shortcut">登录 / 注册</button></div>
+      <div class="top-actions"><button class="button button-ghost" id="browseros-import-trigger">导入收藏</button><button class="button button-ghost" id="import-bfc-local">本机 BFC</button><button class="button button-ghost demo-entry" id="contest-demo-top">体验 APP 演示</button><span id="session-label" class="session-label">离线私人模式</span><button class="button button-ghost" id="login-shortcut">登录 / 注册</button></div>
     </header>
     <div id="notice" role="status" aria-live="polite" class="notice" hidden></div>
     <div id="toast-action" hidden></div>
@@ -40,9 +40,11 @@
           <h2>喜欢的视频，<em>遇见同频的人。</em></h2>
           <p>整理自己的片单，分享愿意公开的内容。私人收藏和笔记默认只在本机。</p>
           <div class="hero-actions">
-            <button class="button button-primary" id="import-trigger">＋ 导入视频</button>
-            <button class="button button-soft" id="discover-from-hero">去遇见同好 →</button><button class="button button-ghost demo-entry" id="contest-demo-hero">体验 90 秒交互演示</button>
+            <button class="button button-primary" id="import-trigger">导入 BrowserOS / BFC 收藏</button>
+            <button class="button button-soft" id="discover-from-hero">去遇见同好 →</button>
+            <button class="button button-ghost demo-entry" id="contest-demo-hero">体验 90 秒交互演示</button>
           </div>
+          <p class="local-bridge-status" id="local-bridge-status">先在 BrowserOS BFC 点击「导出给同频」，再选择导出的 JSON。完整私人数据只保存在本机，不会公开。</p>
         </div>
       </div>
       <section class="watch-zone" aria-label="你的内容流">
@@ -60,8 +62,7 @@
       </section>
       <details class="manage-drawer"><summary>视频备份与本机 BFC 导入 <span>管理我的收藏 ›</span></summary>
         <div class="manage-content">
-          <p class="local-bridge-status" id="local-bridge-status">数据只存于当前浏览器。可以手动导入本机 BFC 收藏，不会自动扫描 B站。</p>
-          <div class="hero-actions"><button class="button button-soft" id="import-bfc-local">从本机 BFC 导入</button><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
+          <div class="hero-actions"><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
         </div>
       </details>
       <div class="section-heading"><div><h3>我的片单</h3><p>在 B站观看原视频；私人收藏默认不公开。</p></div><div class="playlist-actions"><button class="button button-soft" id="library-sharing">管理精选 <span id="draft-indicator" hidden></span></button><button class="button button-soft" id="add-trigger">＋ 添加</button></div></div>

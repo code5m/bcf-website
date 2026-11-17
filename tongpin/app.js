@@ -121,6 +121,7 @@ function atomicLocalImport(items, topics, draft) {
             notes:old.notes||item.notes,
             tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
             sourceFolders:[...new Set([...(old.sourceFolders||[]),...(item.sourceFolders||[])])].slice(0,30),
+            author:old.author||item.author,coverUrl:old.coverUrl||item.coverUrl,
             updatedAt:now
           }:{...item,updatedAt:now};
           videos.put(newer);
@@ -257,12 +258,14 @@ function posterTheme(bvid){
   return "poster-theme-"+(n%6);
 }
 function videoPoster(item,large=false){
-  // Theme art is a local color treatment, never a claimed Bilibili thumbnail or autoplay.
   const url="https://www.bilibili.com/video/"+encodeURIComponent(item.bvid);
   const category=(item.tags||[])[0] || "VIDEO";
+  const cover=String(item.coverUrl||"");
+  const coverHtml=cover?
+    '<img class="poster-cover" src="'+escapeHtml(cover)+'" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">':"";
   return '<a class="video-poster '+posterTheme(item.bvid)+(large?" poster-large":"")+
-    '" href="'+url+'" target="_blank" rel="noopener noreferrer" aria-label="前往 B站观看 '+escapeHtml(item.title)+'">'+
-    '<span class="poster-kicker">VIDEO / BILIBILI</span>'+
+    (cover?" has-cover":"")+'" href="'+url+'" target="_blank" rel="noopener noreferrer" aria-label="前往 B站观看 '+escapeHtml(item.title)+'">'+
+    coverHtml+'<span class="poster-kicker">VIDEO / BILIBILI</span>'+
     '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
     '<span class="poster-play" aria-hidden="true">↗</span>'+
     '<span class="poster-bottom">'+
@@ -283,6 +286,7 @@ function cardHtml(item,place){
     '<span class="visibility-tag '+(published?"is-public":inDraft?"is-draft":"is-private")+'">'+visibility+'</span></div>'+
     '<h4>'+escapeHtml(item.title)+'</h4>'+
     '<p class="video-creator">'+escapeHtml(item.author||"收藏于我的片单")+'</p>'+
+    (item.sourceFolders?.length?'<p class="source-folders">收藏夹：'+escapeHtml(item.sourceFolders.slice(0,3).join("、"))+'</p>':"")+
     '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
     (place==="library"&&item.notes?'<p class="private-note">仅自己可见 · '+escapeHtml(item.notes.slice(0,110))+'</p>':"")+
     '<div class="card-actions">'+buttons+'</div></div></article>';
@@ -892,7 +896,7 @@ async function persistVideo(input) {
   const previous=state.items.find(x=>x.bvid===bvid);
   await txPutMany("videos",[{
     ...previous,bvid,title,metadataMissing:false,author:previous?.author||"",
-    tags:cleanTopics(input.tags,12),notes:String(input.notes||"").slice(0,4000),
+    coverUrl:previous?.coverUrl||"",tags:cleanTopics(input.tags,12),notes:String(input.notes||"").slice(0,4000),
     sourceFolders:previous?.sourceFolders||[],url:"https://www.bilibili.com/video/"+bvid,
     updatedAt:new Date().toISOString()
   }]);
@@ -903,19 +907,26 @@ async function importFile(file) {
   await importPayload(JSON.parse(await file.text()));
 }
 async function importPayload(parsed) {
-  const {items,rejected,duplicates,topics,showcaseDraft,metadataOnly,warnings}=normalizeImported(parsed);
-  if(!items.length)throw new Error("未识别到有效 BV 视频，请导入 BFC 的 JSON 备份");
+  const {items,rejected,duplicates,topics,showcaseDraft,metadataOnly,warnings,kind}=normalizeImported(parsed);
+  if(!items.length)throw new Error("未识别到有效 BV 视频，请导入 BrowserOS/BFC 的完整 JSON 备份");
   const conflicts=topics.filter(t=>state.topics.some(old=>old.name===t.name)).length;
+  const folders=new Set(items.flatMap(item=>item.sourceFolders||[]));
+  const covers=items.filter(item=>item.coverUrl).length;
+  const missingTitles=items.filter(item=>item.metadataMissing).length;
   const restoreDraft=showcaseDraft && confirm("备份包含精选橱窗草稿，恢复到本机吗？不会自动公开。");
-  const yes=confirm("准备在本机导入 "+items.length+" 条视频、"+topics.length+" 个专题。"+
-    (conflicts?"其中 "+conflicts+" 个同名专题会保留现有笔记与顺序并合并新内容。":"")+
-    "导入前会保存一个可撤销快照。确认继续？");
+  const yes=confirm("识别到 "+(kind==="bfc-backup"?"BrowserOS / BFC 工作台备份":"视频收藏备份")+"：\n"+
+    "视频 "+items.length+" 条（重复 "+duplicates+"，跳过 "+rejected+"）\n"+
+    "收藏夹 "+folders.size+" 个 · 专题 "+topics.length+" 个\n"+
+    "真实封面 "+covers+" 张 · 缺标题 "+missingTitles+" 条\n"+
+    (conflicts?"同名专题 "+conflicts+" 个将合并，保留现有笔记与顺序。\n":"")+
+    (warnings.length?warnings.join("\n")+"\n":"")+
+    "数据只导入当前设备的私人片单，不会自动公开或上传社交服务。\n确认继续？");
   if(!yes)return;
   await atomicLocalImport(items,topics,restoreDraft?showcaseDraft:null);
   await refreshLocal();
   notify("安全导入成功："+items.length+" 条视频、"+topics.length+" 个专题；"+
     "重复 "+duplicates+"、跳过 "+rejected+"；"+(metadataOnly?"缺标题 "+metadataOnly+"。":"")+
-    (warnings[0]||"")+" 可点击「撤销上次导入」回滚。");
+    (warnings.join(" ")||"")+" 可点击「撤销上次导入」回滚。");
 }
 function exportLocal() {
   const data={type:"tongpin_private_library",version:3,exportedAt:new Date().toISOString(),
@@ -1112,6 +1123,7 @@ function wire() {
     };
   });
   $("import-trigger").onclick=()=>$("import-file").click();
+  $("browseros-import-trigger").onclick=()=>$("import-file").click();
   $("import-bfc-local").onclick=async()=>{
     const button=$("import-bfc-local");
     if(!confirm("从本机 127.0.0.1:4198 读取你已有的 BFC 收藏备份并导入当前浏览器？不会访问 B站，也不会上传到社交服务。"))return;

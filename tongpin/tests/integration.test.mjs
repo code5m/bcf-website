@@ -22,6 +22,7 @@ test("server blocks source/config and imports BFC only with explicit local owner
     if(req.headers.host!==host){res.writeHead(403).end();return;}
     res.setHeader("Content-Type","application/json");
     if(req.url==="/api/session"){res.end(JSON.stringify({token:"f".repeat(64)}));return;}
+    if(req.url==="/api/capabilities"){res.end(JSON.stringify({bilibili:{completeSnapshot:false}}));return;}
     if(req.url==="/api/workbench/state" && req.headers["x-local-csrf"]==="f".repeat(64)){
       const state={videos:{"BV1234567890":{bvid:"BV1234567890",title:"私人电影"}},library:{topics:[],categories:{}}};
       res.end(JSON.stringify(req.method==="PUT"?{ok:true,summary:{revision:2}}:
@@ -69,6 +70,8 @@ test("server blocks source/config and imports BFC only with explicit local owner
     const imported=await response.json();
     assert.equal(imported.type,"workbench_backup");
     assert.equal(imported.state.videos.BV1234567890.title,"私人电影");
+    assert.equal(imported.exportSource,"bfc-local-bridge");
+    assert.equal(imported.completeSnapshot,false);
     assert.equal(backupRequests,1);
     assert.equal(response.headers.get("cache-control"),"no-store");
     const unauthorized=await fetch(base+"/api/workbench/state");

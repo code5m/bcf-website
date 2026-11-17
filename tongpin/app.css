@@ -880,3 +880,17 @@ body{background:#101116}
 @media(prefers-reduced-motion:reduce){
   .tpd-app *{scroll-behavior:auto!important;transition:none!important;animation:none!important}
 }
+
+
+/* Real imported Bilibili media: only allowlisted HTTPS Bilibili image hosts. */
+.video-poster{position:relative;isolation:isolate;overflow:hidden}
+.poster-cover{position:absolute;inset:0;z-index:-1;width:100%;height:100%;object-fit:cover;opacity:.78}
+.video-poster.has-cover .poster-kicker,.video-poster.has-cover .poster-symbol,
+.video-poster.has-cover .poster-bottom{position:relative;text-shadow:0 1px 7px #000c}
+.video-poster.has-cover .poster-symbol{color:#fff}
+.source-folders{margin:2px 0 7px;color:#b9a9bb;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
+#local-bridge-status{max-width:900px;font-size:11px;line-height:1.6;margin:8px 0 0;color:#c5b5c4}
+@media(max-width:650px){
+  .source-folders{font-size:9px}
+  #local-bridge-status{font-size:10px}
+}

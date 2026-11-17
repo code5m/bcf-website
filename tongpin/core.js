@@ -39,6 +39,16 @@ const pick = (...values) => values.find(value => value !== undefined && value !=
 function readText(source, fallback) {
   return cleanText(pick(source?.title, source?.name, fallback), 150);
 }
+function safeCoverUrl(...values) {
+  const value=cleanText(pick(...values),1200);
+  if(!value)return "";
+  try{
+    const url=new URL(value);
+    if(url.protocol!=="https:" ||
+      !/^(?:i[0-9]+\.hdslb\.com|archive\.biliimg\.com|pic\.bilibili\.com)$/i.test(url.hostname))return "";
+    return url.href;
+  }catch{return "";}
+}
 function mergeUnique(left, right, max = 30) {
   return [...new Set([...left, ...right])].slice(0, max);
 }
@@ -50,8 +60,9 @@ export function normalizeImported(payload) {
   const notes = {...dictionary(root.notes), ...dictionary(library.notes)};
   const watched = {...dictionary(root.watched), ...dictionary(library.watched)};
   const progress = {...dictionary(root.progress), ...dictionary(library.progress)};
-  const topics = shortList(pick(library.topics, root.topics));
+  const topics = shortList(pick(library.topics, root.topics, root.data?.topics));
   const topicByVideo = new Map();
+  const topicVideos = new Map();
   const placeholders = new Set();
   if (topics.length > MAX_IMPORT) throw new Error("import_limit_30000");
   for (const topic of topics) {
@@ -62,16 +73,26 @@ export function normalizeImported(payload) {
     for (const item of members) {
       const bvid = bvidOf(typeof item === "string" ? item : item?.bvid || item?.url || "");
       if (!bvid) continue;
+      if(item && typeof item==="object" && !Array.isArray(item))
+        topicVideos.set(bvid,{...(topicVideos.get(bvid)||{}),...item,bvid});
       const group = topicByVideo.get(bvid) || [];
       if (label && !group.includes(label)) group.push(label);
       topicByVideo.set(bvid, group.slice(0, 12));
       placeholders.add(bvid);
     }
   }
-  const source = Array.isArray(root) ? root :
-    pick(root.videos, root.records, root.items, root.data?.list, root.data?.items);
-  const sourceEntries = Array.isArray(source) ? source.map((value, index) => [String(index), value]) :
-    source && typeof source === "object" ? Object.entries(source) : [];
+  const readbackPages=dictionary(payload.pages);
+  const readbackVideos=Object.values(readbackPages).flatMap(page=>shortList(page?.items));
+  const sourceCollections=Array.isArray(root)?[root]:[
+    library.videos,library.records,library.items,root.videos,root.records,root.items,
+    root.data?.list,root.data?.items,readbackVideos
+  ].filter(value=>Array.isArray(value)||(value&&typeof value==="object"));
+  const sourceEntries=[];
+  for(const source of sourceCollections){
+    if(Array.isArray(source))source.forEach((value,index)=>sourceEntries.push([String(index),value]));
+    else for(const [key,value] of Object.entries(source))sourceEntries.push([key,value]);
+  }
+  for(const [id,video] of topicVideos)sourceEntries.push([id,video]);
   if (sourceEntries.length > MAX_IMPORT) throw new Error("import_limit_30000");
   const byId = new Map();
   let rejected = 0, duplicateCount = 0;
@@ -86,7 +107,8 @@ export function normalizeImported(payload) {
     const fromVideo = cleanText(pick(row.title, row.name, base.title, base.name), 150);
     const isPlaceholder = !fromVideo || /^待补齐标题[ ·]/.test(fromVideo) || /^视频 BV[0-9A-Za-z]{10}$/.test(fromVideo);
     const title = fromVideo && !isPlaceholder ? fromVideo : "待补齐标题 · " + bvid;
-    const originalFolders = pick(row.sourceFolders, row.folders, row.originalFolders, base.originalFolders, []);
+    const originalFolders = pick(row.sourceFolders, row.folders, row.originalFolders, base.originalFolders,
+      row.folderName?[row.folderName]:[]);
     const noteValue = pick(notes[bvid], row.notes, row.note, base.note, "");
     const note = typeof noteValue === "string" ? noteValue : cleanText(noteValue?.text, 4000);
     // The portable v3 archive stores progress as a number; old BFC backups use {percent,completed}.
@@ -100,6 +122,8 @@ export function normalizeImported(payload) {
     const value = {
       bvid, title, metadataMissing: isPlaceholder,
       author: cleanText(pick(row.author, row.owner?.name, row.upper, base.author, ""), 60),
+      coverUrl:safeCoverUrl(row.coverUrl,row.cover,row.pic,row.thumbnail,row.poster,row.image,
+        base.coverUrl,base.cover,base.pic,base.thumbnail),
       tags: cleanTopics([...cleanTopics(row.tags, 12), cleanText(pick(categories[bvid], row.category, row.topic, ""), 24), ...topicLabels], 12),
       topics: [...new Set(topicLabels.map(x=>cleanText(x,80)).filter(Boolean))].slice(0,12),
       notes: cleanText(note, 4000),
@@ -121,6 +145,7 @@ export function normalizeImported(payload) {
     }
     if (!prior.notes) prior.notes = value.notes;
     if (!prior.author) prior.author = value.author;
+    if (!prior.coverUrl) prior.coverUrl = value.coverUrl;
   }
   for (const [key, raw] of sourceEntries) add(raw, key);
   // Legacy BFC Studio exports may contain only library topics/categories/progress,
@@ -155,7 +180,11 @@ export function normalizeImported(payload) {
     topics: importedTopics,
     showcaseDraft: payload.type === "tongpin_private_library" && Array.isArray(payload.showcaseDraft) ?
       normalizeShowcase(payload.showcaseDraft) : null,
-    warnings: metadataOnly ? ["部分 BFC 视频缺少标题：已保留 BV 号、专题和进度，请再导入完整 BFC 工作台备份。"] : []
+    warnings: [
+      ...(metadataOnly ? ["部分 BFC 视频缺少标题：已保留 BV 号、专题和进度，请再导入完整 BFC 工作台备份。"] : []),
+      ...(payload.traversalFinished===false ? ["本文件是未完成分页的部分快照，不能视为完整收藏同步。"] : []),
+      ...(payload.completeSnapshot===false ? ["来源 BFC 未声明完整快照能力，导入后请核对数量和收藏夹。"] : [])
+    ]
   };
 }
 export function matchPublic(me, other) {
