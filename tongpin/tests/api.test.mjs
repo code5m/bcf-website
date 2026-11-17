@@ -133,3 +133,41 @@ test("invite-only deployment: admin issues single-use codes, reports and suspens
     else process.env.TONGPIN_ADMIN_TOKEN=prev.admin;
   }
 });
+
+test("imports a real-shaped BFC workbench backup while retaining topic membership and progress", () => {
+  const payload={type:"workbench_backup",version:1,state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"AI 电影实战",author:"作者A",raw:{title:"AI 电影实战",originalFolders:["默认收藏"]}}},
+    library:{topics:[{id:"learn",name:"AI 电影制作",items:["BV1234567890","BV0987654321"],chapters:["入门","实践"]}],
+      categories:{"BV1234567890":"电影"},watched:{"BV1234567890":true},
+      notes:{"BV1234567890":"本人的私人笔记"},progress:{"BV1234567890":{percent:38}}}
+  }};
+  const result=normalizeImported(payload);
+  assert.equal(result.kind,"bfc-backup");
+  assert.equal(result.items.length,2);
+  const known=result.items.find(v=>v.bvid==="BV1234567890");
+  assert.equal(known.title,"AI 电影实战");
+  assert.equal(known.notes,"本人的私人笔记");
+  assert.equal(known.watched,true);
+  assert.equal(known.progress,38);
+  assert.deepEqual(known.topics,["AI 电影制作"]);
+  assert.equal(result.metadataOnly,1);
+  assert.equal(result.items.find(v=>v.bvid==="BV0987654321").metadataMissing,true);
+  assert.equal(result.topics.length,1);
+});
+test("imports legacy BFC studio exports without fabricating metadata and round-trips Tongpin drafts",()=>{
+  const legacy={topics:[{name:"剪辑",items:["BV1234567890"]}],categories:{"BV1234567890":"视频创作"},watched:{"BV1234567890":true}};
+  const x=normalizeImported(legacy);
+  assert.equal(x.kind,"bfc-topics-only");
+  assert.equal(x.metadataOnly,1);
+  assert.equal(x.items[0].watched,true);
+  assert.match(x.items[0].title,/待补齐标题/);
+  const backup={type:"tongpin_private_library",videos:x.items,
+    showcaseDraft:[{bvid:"BV1234567890",title:"公开精选",tags:["电影"]}]};
+  const restored=normalizeImported(backup);
+  assert.equal(restored.showcaseDraft.length,1);
+  assert.equal(restored.showcaseDraft[0].notes,undefined);
+});
+test("rejects huge imports and does not invent invalid BV identities",()=>{
+  assert.throws(()=>normalizeImported({videos:Array.from({length:30001},()=>({bvid:"BV1234567890"}))}),/limit/);
+  assert.equal(normalizeImported({videos:[{id:"invalid"}]}).items.length,0);
+});
