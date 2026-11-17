@@ -92,7 +92,7 @@ export function normalizeImported(payload) {
     const value = {
       bvid, title, metadataMissing: isPlaceholder,
       author: cleanText(pick(row.author, row.owner?.name, row.upper, base.author, ""), 60),
-      tags: cleanTopics([...shortList(row.tags), cleanText(pick(categories[bvid], row.category, row.topic, ""), 24), ...topicLabels], 12),
+      tags: cleanTopics([...cleanTopics(row.tags, 12), cleanText(pick(categories[bvid], row.category, row.topic, ""), 24), ...topicLabels], 12),
       topics: [...new Set(topicLabels.map(x=>cleanText(x,80)).filter(Boolean))].slice(0,12),
       notes: cleanText(note, 4000),
       sourceFolders: [...new Set(shortList(originalFolders).map(x=>cleanText(x,80)).filter(Boolean))].slice(0,30),
@@ -135,7 +135,7 @@ export function normalizeImported(payload) {
     return {
       name:cleanText(t?.name,80),description:cleanText(t?.description,500),
       notes:cleanText(t?.notes,4000),chapters:shortList(t?.chapters).map(x=>cleanText(x,80)).filter(Boolean).slice(0,30),
-      items:shortList(t?.items).map(x=>bvidOf(x)).filter(Boolean).slice(0,MAX_IMPORT),sections
+      items:shortList(t?.items).map(x=>bvidOf(typeof x==="string"?x:x?.bvid||x?.id||x?.url||"")).filter(Boolean).slice(0,MAX_IMPORT),sections
     };
   }).filter(x=>x.name);
   return {
