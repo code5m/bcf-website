@@ -3,60 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0f172a">
-  <meta name="description" content="同频：本地收藏，主动公开，因共同兴趣认识朋友。">
+  <meta name="theme-color" content="#0d0e13">
+  <meta name="description" content="同频：从喜欢的视频出发，找到聊得来的人。私人片单只在设备中，想分享什么由你决定。">
   <link rel="manifest" href="/tongpin/manifest.webmanifest">
   <link rel="icon" href="/tongpin/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/tongpin/app.css">
-  <title>同频 · 因收藏而相识</title>
+  <title>同频 · 因收藏而相识 · 视频与同好</title>
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="wordmark" href="/tongpin/"><span class="brand-mark">◎</span><span>同频 <small>TONGPIN</small></span></a>
-    <p class="brand-caption">因收藏而相识。</p>
-    <nav id="nav" aria-label="功能导航">
-      <button class="nav-item active" data-tab="library"><span>▦</span> 我的收藏</button>
-      <button class="nav-item" data-tab="learning"><span>◫</span> 学习专题</button>
-      <button class="nav-item" data-tab="showcase"><span>◈</span> 收藏橱窗</button>
-      <button class="nav-item" data-tab="discover"><span>✧</span> 发现同频</button>
-      <button class="nav-item" data-tab="friends"><span>♡</span> 好友与消息 <small id="unread-count" hidden></small></button>
-      <button class="nav-item" data-tab="account"><span>⚙</span> 账户设置</button>
+    <a class="wordmark" href="/tongpin/" aria-label="同频 · 视频与兴趣交友"><span class="brand-mark">◉</span><span>同频 <small>VIDEO × PEOPLE</small></span></a>
+    <p class="brand-caption">一条视频，开启一种关系。</p>
+    <nav id="nav" aria-label="主导航">
+      <button class="nav-item active" data-tab="library"><span aria-hidden="true">▶</span> 刷视频</button>
+      <button class="nav-item" data-tab="discover"><span aria-hidden="true">✧</span> 遇见</button>
+      <button class="nav-item" data-tab="friends"><span aria-hidden="true">♡</span> 消息 <small id="unread-count" hidden></small></button>
+      <button class="nav-item" data-tab="learning"><span aria-hidden="true">◫</span> 共学</button>
+      <button class="nav-item" data-tab="showcase"><span aria-hidden="true">✦</span> 分享</button>
+      <button class="nav-item" data-tab="account"><span aria-hidden="true">◉</span> 我的</button>
     </nav>
     <div class="sidebar-footer">
-      <p><span class="status-dot"></span> 本地优先 · 默认私密</p>
+      <p><span class="status-dot"></span> 真正的同好，从你主动分享开始</p>
       <a href="/studio.html#topics">返回原 BFC 专题工作台 ↗</a>
     </div>
   </aside>
   <main class="main-area">
     <header class="topbar">
-      <div><span class="overline">SELF CURATED · SOCIAL</span><h1 id="page-title">我的收藏</h1></div>
+      <div><span class="overline">TONGPIN / VIDEO & FRIENDS</span><h1 id="page-title">刷视频</h1></div>
       <div class="top-actions"><span id="session-label" class="session-label">离线私人模式</span><button class="button button-ghost" id="login-shortcut">登录 / 注册</button></div>
     </header>
     <div id="notice" role="status" aria-live="polite" class="notice" hidden></div>
     <section class="panel-section" id="tab-library">
-      <div class="hero">
-        <div>
-          <span class="eyebrow">YOUR OWN DIGITAL COLLECTION</span>
-          <h2>把喜欢的内容，<br>变成属于你的世界。</h2>
-          <p>先把收藏带回本地，再决定哪些值得分享。你的私人笔记、原始收藏夹和学习记录不会自动上传。</p>
-          <div class="hero-actions"><button class="button button-primary" id="import-trigger">导入 JSON 备份</button><button class="button button-soft" id="import-bfc-local">从本机 BFC 一键导入</button><button class="button button-soft" id="export-trigger">导出备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
+      <div class="hero hero-cinematic">
+        <div class="hero-copy">
+          <span class="eyebrow"><span class="live-spark"></span> 不盲刷，刷到懂你的人</span>
+          <h2>好看的视频很多。<br><em>懂你的人，更难得。</em></h2>
+          <p>把收藏变成自己的视频流，选几条愿意分享的内容，让拥有相同兴趣的人找到你。视频仍在 B站原站观看，私人笔记不会自动公开。</p>
+          <div class="hero-actions">
+            <button class="button button-primary" id="import-trigger">＋ 导入我的视频</button>
+            <button class="button button-soft hero-meet-action" id="discover-from-hero">✧ 去遇见同好</button>
+          </div>
+          <div class="hero-commitment"><span>✦ 不需要上传全部收藏</span><span>✦ 只有真实用户参与匹配</span></div>
         </div>
-        <div class="hero-art" aria-hidden="true"><div class="art-orbit orbit-a"></div><div class="art-orbit orbit-b"></div><div class="art-center">◈</div><div class="art-pill p1">AI 创作</div><div class="art-pill p2">电影学习</div><div class="art-pill p3">编程</div></div>
+        <div class="hero-stage" aria-label="仅用于界面说明，并非真实视频缩略图">
+          <div class="stage-halo"></div>
+          <div class="stage-poster stage-poster-left"><span>VIDEO</span><strong>▸</strong><small>发现内容</small></div>
+          <div class="stage-poster stage-poster-front"><span>同频 / TONGPIN</span><strong>♥</strong><small>找到同好</small></div>
+          <div class="stage-bubble">共同兴趣<br><b>让聊天有话题</b></div>
+        </div>
       </div>
-      <p class="local-bridge-status" id="local-bridge-status">数据仅在你的浏览器中保存。需要时可从本机 BFC 4198 手动导入，不会自动扫描 B站。</p>
+      <section class="watch-zone" aria-label="你的内容流">
+        <div class="section-heading watch-zone-heading"><div><span class="overline">WATCH / DISCOVER</span><h3>从你喜欢的那一条开始</h3><p id="feed-status">导入收藏后，这里会出现真正属于你的视频片单。</p></div><button class="button button-soft" id="feed-meet-cta">去遇见同好 →</button></div>
+        <div id="feed-feature" class="feed-feature" aria-live="polite"></div>
+        <div class="feed-rail"><strong>按兴趣刷</strong><div id="feed-channels" class="channel-list" role="group" aria-label="视频兴趣筛选"></div></div>
+      </section>
+      <section class="community-zone" aria-label="公开精选视频">
+        <div class="section-heading"><div><span class="overline">FROM REAL PEOPLE</span><h3>大家最近在分享什么？</h3><p>只展示真实用户自己选择公开的内容，不读取任何人的私人收藏或笔记。视频在 B站观看。</p></div><button class="button button-soft" id="refresh-community">刷新分享</button></div>
+        <div id="community-list" class="community-grid" aria-live="polite"><div class="community-empty">正在寻找真实用户的公开分享…</div></div>
+      </section>
+      <div class="social-bridge">
+        <div class="bridge-avatars" aria-hidden="true"><span>✦</span><span>♡</span><span>✧</span></div>
+        <div><strong>视频是话题，人才是故事的下一集。</strong><p>主动发布几条精选视频后，你可以根据真实的公开共同兴趣发出交友申请。</p></div>
+        <button class="button button-soft" id="feed-connection-cta">认识同频的人 →</button>
+      </div>
+      <details class="manage-drawer"><summary>视频备份与本机 BFC 导入 <span>管理我的收藏 ›</span></summary>
+        <div class="manage-content">
+          <p class="local-bridge-status" id="local-bridge-status">数据只存于当前浏览器。可以手动导入本机 BFC 收藏，不会自动扫描 B站。</p>
+          <div class="hero-actions"><button class="button button-soft" id="import-bfc-local">从本机 BFC 导入</button><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
+        </div>
+      </details>
       <div class="stats">
-        <article><span>我的本地视频</span><strong id="stat-count">0</strong><small>只保存在本浏览器</small></article>
-        <article><span>收藏专题标签</span><strong id="stat-topics">0</strong><small>可多标签组织</small></article>
-        <article><span>已公开展示</span><strong id="stat-shared">0</strong><small>需本人主动选择</small></article>
+        <article><span>我的视频</span><strong id="stat-count">0</strong><small>私人片单</small></article>
+        <article><span>兴趣标签</span><strong id="stat-topics">0</strong><small>找到你的偏好</small></article>
+        <article><span>主动分享</span><strong id="stat-shared">0</strong><small>公开精选</small></article>
       </div>
-      <div class="section-heading"><div><span class="overline">PRIVATE LIBRARY</span><h3>私人收藏库</h3><p>搜索、添加、编辑，只有点击“加入橱窗”并单独确认发布，才会公开所选视频。</p></div><button class="button button-soft" id="add-trigger">＋ 添加视频</button></div>
+      <div class="section-heading"><div><span class="overline">YOUR PLAYLIST</span><h3>接着刷 · 我的片单</h3><p>卡片直接打开 B站原站观看。主题色块是界面视觉，不冒充原视频缩略图。</p></div><button class="button button-soft" id="add-trigger">＋ 添加视频</button></div>
       <div class="toolbar"><input type="search" id="library-search" placeholder="搜索视频标题、BV号、标签或 UP 主" aria-label="搜索本地收藏"><select id="library-tag"><option value="">全部标签</option></select></div>
       <div class="video-grid" id="library-list"></div>
       <div class="pager"><span id="library-page-label"></span><button class="button button-soft" id="page-prev">上一页</button><button class="button button-soft" id="page-next">下一页</button></div>
     </section>
     <section class="panel-section" id="tab-learning" hidden>
-      <div class="section-heading"><div><span class="overline">YOUR LEARNING TRACKS</span><h3>我的学习专题</h3><p>沿用导入的 BFC 专题，或按本地标签生成学习列表。完成状态仅由你手动标记，不代表 B站播放记录。</p></div></div>
+      <div class="section-heading"><div><span class="overline">WATCH TOGETHER</span><h3>一起看，一起进步</h3><p>沿用导入的 BFC 专题，或按本地标签生成学习列表。完成状态仅由你手动标记，不代表 B站播放记录。</p></div></div>
       <div class="privacy-tip">学习进度和私人笔记仅保存在当前浏览器；更换设备前请导出 JSON 备份。</div>
       <div id="learning-list" class="learning-grid"></div>
       <div class="section-heading"><div><span class="overline">TOGETHER, WITH CONSENT</span><h3>结伴学习</h3>
@@ -65,22 +93,24 @@
       <div id="study-plans" class="learning-grid"></div>
     </section>
     <section class="panel-section" id="tab-showcase" hidden>
-      <div class="section-heading"><div><span class="overline">PICKED BY YOU</span><h3>我的收藏橱窗</h3><p>只发布你主动选择的最多 20 个视频；仅上传视频标题、BV号、公开标签和介绍，不上传私人笔记。</p></div><div class="showcase-actions"><button class="button button-soft" id="unpublish-showcase">撤下全部公开收藏</button><button class="button button-primary" id="publish-showcase">确认发布橱窗</button></div></div>
+      <div class="section-heading"><div><span class="overline">YOUR PUBLIC PICKS</span><h3>分享我的心动视频</h3><p>只发布你主动选择的最多 20 个视频；仅上传视频标题、BV号、公开标签和介绍，不上传私人笔记。</p></div><div class="showcase-actions"><button class="button button-soft" id="unpublish-showcase">撤下全部公开收藏</button><button class="button button-primary" id="publish-showcase">确认发布橱窗</button></div></div>
       <div class="privacy-tip"><strong>公开前确认：</strong>橱窗草稿只保存在本地。登录后点击“确认发布橱窗”才会上传所选内容。即使发布了橱窗，个人资料默认仍不允许被其他人发现，需另外打开“允许发现我”。</div>
       <p id="published-summary" class="local-bridge-status">尚未公开任何内容</p>
+      <div id="share-next-step" class="share-next" hidden><span class="share-next-icon" aria-hidden="true">♡</span><div><strong>已经分享了视频，下一步让同好找到你。</strong><p>前往「我的」，完善兴趣并手动开启“允许被发现”；不勾选就不会出现在交友匹配中。</p></div><button class="button button-primary" id="share-next-profile">完善资料 →</button></div>
       <div id="showcase-list" class="video-grid"></div>
     </section>
     <section class="panel-section" id="tab-discover" hidden>
-      <div class="section-heading"><div><span class="overline">PEOPLE WITH SHARED INTERESTS</span><h3>发现同频的人</h3><p>以下内容是用户自行发布的精选视频，不代表 B站已核验双方真实收藏关系。</p><p>匹配只参考双方主动公开的收藏、标签和兴趣。相似度是排序分数，不是心理学意义上的契合百分比。</p></div><button class="button button-soft" id="refresh-people">刷新匹配</button></div>
+      <div class="section-heading"><div><span class="overline">MEET PEOPLE, NOT NUMBERS</span><h3>遇见聊得来的人</h3><p>不靠刷脸盲猜缘分，从彼此愿意分享的视频与兴趣开始认识。只显示真实注册且主动允许发现的用户；并非 B站官方认证。</p></div><button class="button button-soft" id="refresh-people">刷新匹配</button></div>
+      <div class="meet-intro"><span class="meet-intro-icon" aria-hidden="true">♡</span><div><strong>同频的第一句话，有内容可聊。</strong><p>匹配只参考双方主动公开的信息，不访问私人笔记。发出申请后，对方接受才能聊天。</p></div><button class="button button-soft" id="meet-profile-cta">完善我的兴趣 →</button></div>
       <div id="discover-list" class="people-grid"></div>
     </section>
     <section class="panel-section" id="tab-friends" hidden>
-      <div class="section-heading"><div><span class="overline">CONNECTIONS</span><h3>好友与消息 <span id="pending-count" class="pending-count" hidden></span></h3><p>只有对方接受交友申请后才能聊天。可随时拉黑、举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
+      <div class="section-heading"><div><span class="overline">REAL CONVERSATIONS</span><h3>消息 · 聊点喜欢的 <span id="pending-count" class="pending-count" hidden></span></h3><p>从共同喜欢的视频开启话题。好友申请需要对方同意，也可以随时结束聊天、拉黑或举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
       <div id="friends-list" class="people-grid"></div>
-      <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><button class="button button-soft" id="load-older" hidden>加载更早的消息</button><div id="chat-list" class="chat-list"></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
+      <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><button class="button button-soft" id="load-older" hidden>加载更早的消息</button><div id="chat-list" class="chat-list"></div><div class="icebreakers"><span>没想好怎么开口？</span><button type="button" data-chat-prompt="最近看到哪条视频让你特别想分享？">聊聊最近看的</button><button type="button" data-chat-prompt="我们共同喜欢的内容里，你最推荐哪条？">求一个推荐</button></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
     </section>
     <section class="panel-section" id="tab-account" hidden>
-      <div class="section-heading"><div><span class="overline">PRIVACY & IDENTITY</span><h3>账户与公开设置</h3><p>无需注册即可使用私人收藏；想交友时再创建账号。</p></div></div>
+      <div class="section-heading"><div><span class="overline">YOUR STORY</span><h3>介绍一下你自己</h3><p>无需注册即可使用私人收藏；想交友时再创建账号。</p></div></div>
       <div class="form-panel" id="auth-panel">
         <div class="auth-tabs"><button id="auth-mode-register" class="active">注册</button><button id="auth-mode-login">登录</button></div>
         <form id="auth-form" class="stacked-form">

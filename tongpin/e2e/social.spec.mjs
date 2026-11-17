@@ -47,8 +47,16 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await addPrivate(b,"Bob的内容");
     await register(b,"bob_"+suffix,"Bob");
     await publish(b);
+    await b.locator("[data-tab=library]").click();
+    await expect(b.locator("#community-list .community-card")).toHaveCount(1);
+    await expect(b.locator("#community-list [data-action=request]")).toBeVisible();
+    await expect(b.locator("#community-list")).toContainText("AI 电影制作入门");
+    await expect(b.locator("#community-list")).not.toContainText("Alice的内容");
     await a.locator("[data-tab=discover]").click();
     await expect(a.locator("#discover-list")).toContainText("Bob");
+    await expect(a.locator("#discover-list .meet-card")).toHaveCount(1);
+    await expect(a.locator("#discover-list .meet-card-banner")).toContainText("你们都分享过");
+    await expect(a.locator("#discover-list .public-picks")).toHaveCount(1);
     await expect(a.locator("#discover-list")).not.toContainText("Bob的内容");
     await a.locator("#discover-list [data-action=request]").click();
     await b.locator("[data-tab=friends]").click();
@@ -60,6 +68,10 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await a.locator("#chat-text").fill("一起学习电影制作吗？");
     await a.locator('#chat-form .button-primary').click();
     await expect(a.locator("#chat-list")).toContainText("一起学习电影制作吗？");
+    await expect(a.locator("#chat-panel .icebreakers")).toBeVisible();
+    await a.locator('[data-chat-prompt="我们共同喜欢的内容里，你最推荐哪条？"]').click();
+    await expect(a.locator("#chat-text")).toHaveValue("我们共同喜欢的内容里，你最推荐哪条？");
+    await a.locator("#chat-text").fill("");
     await b.locator("#refresh-friends").click();
     await b.locator("#friends-list [data-action=chat]").click();
     await expect(b.locator("#chat-list")).toContainText("一起学习电影制作吗？");
@@ -78,6 +90,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await b.locator("[data-tab=learning]").click();
     await expect(b.locator("#study-plans")).toContainText("对方完成 1 项");
     await b.locator("[data-tab=friends]").click();
+    await b.locator("#friends-list .safety-options summary").click();
     await b.locator("#friends-list [data-action=block]").click();
     await expect(b.locator("#friends-list")).not.toContainText("Alice");
     await a.locator("[data-tab=friends]").click();
@@ -93,7 +106,7 @@ test("visitor can use private library without registering and sees no fabricated
   await page.goto("/tongpin/");
   await expect(page.locator("#stat-count")).toHaveText("0");
   await page.locator("[data-tab=discover]").click();
-  await expect(page.locator("#discover-list")).toContainText("登录后才能发现同频的人");
+  await expect(page.locator("#discover-list")).toContainText("先介绍自己，再遇见喜欢同样内容的人");
   const response=await page.request.get("/api/social/health");
   expect(response.status()).toBe(200);
   expect((await response.json()).externalBilibiliRequests).toBe(0);
@@ -120,7 +133,7 @@ test("BFC JSON imports topics, restores learning progress, and exports private b
   await page.locator("[data-tab=library]").click();
   const [download]=await Promise.all([
     page.waitForEvent("download"),
-    page.locator("#export-trigger").click()
+    page.locator(".manage-drawer summary").click().then(()=>page.locator("#export-trigger").click())
   ]);
   expect(download.suggestedFilename()).toContain("tongpin-private-backup-");
 });
@@ -164,6 +177,7 @@ test("two BFC imports preserve existing topic notes and offer atomic undo",async
   await expect(page.locator("#learning-list")).toContainText("第一段课程");
   await expect(page.locator("#learning-list")).toContainText("第二段课程");
   await page.locator("[data-tab=library]").click();
+  await page.locator(".manage-drawer summary").click();
   await page.locator("#undo-import").click();
   await expect(page.locator("#stat-count")).toHaveText("1");
   await expect(page.locator("#library-list")).not.toContainText("第二段课程");
@@ -190,7 +204,7 @@ test("switching social accounts does not retain the old account's visible profil
   await expect(page.locator("#unread-count")).toBeHidden();
   await make("b_"+Date.now().toString(36));
   await page.locator("[data-tab=friends]").click();
-  await expect(page.locator("#friends-list")).toContainText("还没有好友");
+  await expect(page.locator("#friends-list")).toContainText("还没有新的对话");
   await page.locator("[data-tab=learning]").click();
   await expect(page.locator("#study-plans")).toContainText("还没有共学计划");
 });
@@ -212,6 +226,7 @@ test("delete after importing cannot resurrect a private note through import undo
   await expect(page.locator("#stat-count")).toHaveText("2");
   await page.locator('#library-list [data-action="remove"][data-id="BV1234567890"]').click();
   await expect(page.locator("#stat-count")).toHaveText("1");
+  await page.locator(".manage-drawer summary").click();
   await page.locator("#undo-import").click();
   await expect(page.locator("#stat-count")).toHaveText("1");
   await expect(page.locator("#library-list")).not.toContainText("秘密学习视频");
@@ -232,6 +247,7 @@ test("manual correction of placeholder title survives subsequent import",async({
   await page.locator('#library-list [data-action="edit"][data-id="BV1234567890"]').click();
   await page.locator('#add-form [name="title"]').fill("人工核实的真实标题");
   await page.locator("#add-form .button-primary").click();
+  await page.locator(".manage-drawer summary").click();
   const [download]=await Promise.all([page.waitForEvent("download"),page.locator("#export-trigger").click()]);
   const {readFile}=await import("node:fs/promises");
   const archive=JSON.parse(await readFile(await download.path(),"utf8"));

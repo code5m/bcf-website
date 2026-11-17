@@ -34,9 +34,9 @@ function notify(text, isError = false) {
   box.hidden = false;
 }
 const state = {
-  items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
+  items: [], showcase: [], user: null, people: [], connections: [], blocked: [], communityFeed: [], communityStatus:"loading",
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:""
 };
 let db;
 function openLocal() {
@@ -204,8 +204,9 @@ function setTab(tab) {
   });
   document.querySelectorAll(".panel-section").forEach(el=>el.hidden=el.id!=="tab-"+tab);
   $("page-title").textContent=({
-    library:"我的收藏",learning:"学习专题",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
+    library:"刷视频",learning:"一起共学",showcase:"我的分享",discover:"遇见同好",friends:"消息",account:"我的资料"
   })[tab];
+  if(tab==="library")refreshCommunityFeed();
   if(tab==="learning"){renderLearning();refreshStudyPlans();}
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
@@ -218,21 +219,121 @@ function tagsHtml(tags) {
 function empty(title,desc) {
   return '<div class="empty-state"><strong>'+escapeHtml(title)+'</strong>'+escapeHtml(desc)+'</div>';
 }
-function cardHtml(item,place) {
+function posterTheme(bvid){
+  let n=0;
+  for(const char of String(bvid||""))n=(n*33+char.charCodeAt(0))%9973;
+  return "poster-theme-"+(n%6);
+}
+function videoPoster(item,large=false){
+  // Theme art is a local color treatment, never a claimed Bilibili thumbnail or autoplay.
+  const url="https://www.bilibili.com/video/"+encodeURIComponent(item.bvid);
+  const category=(item.tags||[])[0] || "VIDEO";
+  return '<a class="video-poster '+posterTheme(item.bvid)+(large?" poster-large":"")+
+    '" href="'+url+'" target="_blank" rel="noopener noreferrer" aria-label="在 B站打开 '+escapeHtml(item.title)+'">'+
+    '<span class="poster-kicker">TONGPIN / CURATED</span>'+
+    '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
+    '<span class="poster-play" aria-hidden="true">▶</span>'+
+    '<span class="poster-bottom"><strong>'+escapeHtml(item.title)+'</strong>'+
+    '<small>打开 B站原视频 ↗</small></span></a>';
+}
+function cardHtml(item,place){
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
-  const card = '<div class="card-top"><span>'+escapeHtml(item.bvid)+'</span><a href="'+
-    "https://www.bilibili.com/video/"+encodeURIComponent(item.bvid)+
-    '" target="_blank" rel="noopener noreferrer">去 B站观看 ↗</a></div>'+
-    '<h4>'+escapeHtml(item.title)+'</h4><p>'+escapeHtml(item.author||"")+'</p>'+
-    '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
-    (place==="library"&&item.notes?'<p>私人笔记：'+escapeHtml(item.notes.slice(0,110))+'</p>':"")+
-    '<div class="card-actions">';
   const buttons=place==="library"
-    ?'<button data-action="edit" data-id="'+item.bvid+'">编辑</button>'+
-    '<button class="'+(inDraft?"":"highlight")+'" data-action="toggle" data-id="'+item.bvid+'">'+(inDraft?"移出橱窗草稿":"加入橱窗草稿")+'</button>'+
-    '<button data-action="remove" data-id="'+item.bvid+'">删除本地记录</button>'
-    :'<button data-action="toggle" data-id="'+item.bvid+'">移出草稿</button>';
-  return '<article class="video-card">'+card+buttons+'</div></article>';
+    ? '<button data-action="edit" data-id="'+item.bvid+'">✎ 编辑</button>'+
+      '<button class="'+(inDraft?"":"highlight")+'" data-action="toggle" data-id="'+item.bvid+'">'+
+      (inDraft?"✓ 已加入分享":"♡ 放进精选")+'</button>'+
+      '<button class="card-danger" data-action="remove" data-id="'+item.bvid+'">删除</button>'
+    : '<button data-action="toggle" data-id="'+item.bvid+'">移出分享</button>';
+  return '<article class="video-card video-post-card">'+videoPoster(item)+
+    '<div class="video-card-body"><div class="card-top"><span>'+escapeHtml(item.bvid)+'</span>'+
+    '<span>'+(item.watched?"✓ 已看过":"我的私人片单")+'</span></div>'+
+    '<h4>'+escapeHtml(item.title)+'</h4>'+
+    '<p class="video-creator">'+escapeHtml(item.author||"收藏于我的片单")+'</p>'+
+    '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
+    (place==="library"&&item.notes?'<p class="private-note">仅自己可见 · '+escapeHtml(item.notes.slice(0,110))+'</p>':"")+
+    '<div class="card-actions">'+buttons+'</div></div></article>';
+}
+function renderFeed(){
+  if(!$("feed-feature"))return;
+  const tags=[...new Set(state.items.flatMap(item=>item.tags||[]))];
+  if(state.feedTag&&!tags.includes(state.feedTag))state.feedTag="";
+  const counts=new Map();
+  for(const item of state.items)for(const tag of new Set(item.tags||[]))counts.set(tag,(counts.get(tag)||0)+1);
+  const popular=[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,7).map(x=>x[0]);
+  $("feed-channels").innerHTML=[''].concat(popular).map(tag=>
+    '<button type="button" class="channel-chip'+(tag===state.feedTag?" selected":"")+
+    '" data-feed-tag="'+escapeHtml(tag)+'" aria-pressed="'+Boolean(tag===state.feedTag)+'">'+
+    (tag?"# "+escapeHtml(tag):"全部视频")+'</button>').join("");
+  const filtered=state.feedTag?state.items.filter(item=>(item.tags||[]).includes(state.feedTag)):state.items;
+  $("feed-status").textContent=state.items.length?
+    "你的私人视频流 · "+filtered.length+" 条"+(state.feedTag?" · 话题 #"+state.feedTag:"")+" · 视频在 B站原站观看":
+    "先导入你真正喜欢的视频。这里不展示虚构影片，也不会自动公开私人收藏。";
+  const item=filtered[0];
+  if(!item){
+    $("feed-feature").innerHTML='<div class="spotlight-empty"><span class="spotlight-spark" aria-hidden="true">▶</span>'+
+      '<div><span class="overline">MAKE IT YOURS</span><h4>第一条视频，等你带进来。</h4>'+
+      '<p>把 BFC 收藏或 JSON 片单导入，就能从海报式视频卡片开始浏览。也可以先遇见已经主动分享内容的真实用户。</p>'+
+      '<div class="spotlight-buttons"><button data-action="import" class="button button-primary">导入视频</button>'+
+      '<button data-action="discover" class="button button-soft">去遇见同好</button></div></div></div>';
+    return;
+  }
+  const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
+  $("feed-feature").innerHTML='<article class="spotlight-video">'+videoPoster(item,true)+
+    '<div class="spotlight-content"><span class="overline">FIRST IN YOUR PLAYLIST</span>'+
+    '<span class="spotlight-label">✦ 你喜欢的视频</span><h4>'+escapeHtml(item.title)+'</h4>'+
+    '<p>'+escapeHtml(item.author||"从你保存的收藏开始，发现值得看和聊的内容。")+'</p>'+
+    '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
+    '<div class="spotlight-buttons"><a class="button button-primary" href="'+
+    "https://www.bilibili.com/video/"+encodeURIComponent(item.bvid)+
+    '" target="_blank" rel="noopener noreferrer">▶ 去 B站观看</a>'+
+    '<button class="button button-soft" data-action="toggle" data-id="'+item.bvid+'">'+
+    (inDraft?"✓ 已放进精选":"♡ 分享到精选")+'</button></div>'+
+    '<small class="spotlight-disclaimer">精选只会保存草稿；正式公开仍需你到「分享」页确认。</small></div></article>';
+}
+function renderCommunityFeed(){
+  const target=$("community-list");
+  if(!target)return;
+  if(state.communityStatus==="loading"){
+    target.innerHTML='<div class="community-empty">正在寻找真实用户主动分享的内容…</div>';
+    return;
+  }
+  if(state.communityStatus==="offline"){
+    target.innerHTML='<div class="community-empty"><strong>公开分享暂时无法加载</strong><p>社交服务未连接，本地视频和私人片单仍然可以使用。</p></div>';
+    return;
+  }
+  if(!state.communityFeed.length){
+    target.innerHTML='<div class="community-empty"><strong>还没有人公开分享视频。</strong>'+
+      '<p>这里不会放虚构视频充数。你可以从自己的真实收藏里选择几条，成为首批分享者。</p>'+
+      '<button class="button button-primary" data-action="showcase">去整理我的精选 →</button></div>';
+    return;
+  }
+  target.innerHTML=state.communityFeed.map(item=>{
+    const user=item.curator||{};
+    const caption=item.caption?'<p class="community-caption">'+escapeHtml(item.caption)+'</p>':"";
+    return '<article class="community-card">'+videoPoster(item)+
+      '<div class="community-card-body"><div class="curator-line"><div class="curator-avatar">'+
+      escapeHtml((user.displayName||user.handle||"?").slice(0,1))+'</div><div><b>'+
+      escapeHtml(user.displayName||user.handle||"同频用户")+'</b><small>@'+
+      escapeHtml(user.handle||"")+' · 主动公开精选</small></div></div>'+
+      '<h4>'+escapeHtml(item.title)+'</h4>'+caption+
+      '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
+      '<div class="community-cta"><button data-action="request" data-id="'+escapeHtml(user.id)+
+      '">♡ 申请认识 TA</button></div></div></article>';
+  }).join("");
+}
+async function refreshCommunityFeed(){
+  const epoch=state.sessionEpoch;
+  try{
+    const result=await api("/feed");
+    if(epoch!==state.sessionEpoch)return;
+    state.communityFeed=result.items||[];
+    state.communityStatus="loaded";
+  }catch{
+    if(epoch!==state.sessionEpoch)return;
+    state.communityFeed=[];
+    state.communityStatus="offline";
+  }
+  renderCommunityFeed();
 }
 function renderLocal() {
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
@@ -245,6 +346,7 @@ function renderLocal() {
   tagSelect.value=tags.includes(chosen)?chosen:"";
   const q=$("library-search").value.trim().toLowerCase();
   const filtered=state.items.filter(i=>(!tagSelect.value||(i.tags||[]).includes(tagSelect.value))&&
+    (!state.feedTag||(i.tags||[]).includes(state.feedTag))&&
     (!q||[i.title,i.bvid,i.author,...(i.tags||[])].join(" ").toLowerCase().includes(q)));
   const pages=Math.max(1,Math.ceil(filtered.length/24));
   state.page=Math.min(state.page,pages);
@@ -255,6 +357,8 @@ function renderLocal() {
   $("page-next").disabled=state.page>=pages;
   renderShowcase();
   renderLearning();
+  renderFeed();
+  renderCommunityFeed();
 }
 function renderShowcase() {
   const items=state.showcase;
@@ -339,6 +443,7 @@ function renderAuth() {
   $("login-shortcut").textContent=logged?"我的资料":"登录 / 注册";
   $("auth-panel").hidden=logged;
   $("profile-panel").hidden=!logged;
+  $("share-next-step").hidden=!(logged && state.user.showcase?.length && !state.user.discoverable);
   $("stat-shared").textContent=state.user?.showcase?.length||0;
   if(logged){
     const form=$("profile-form");
@@ -367,43 +472,102 @@ function renderAuthMode() {
   $("auth-submit").textContent=register?"创建账号":"登录";
   $("auth-form").elements.password.autocomplete=register?"new-password":"current-password";
 }
-function renderPeople() {
-  $("discover-list").innerHTML=!state.user?empty("登录后才能发现同频的人","你的私人收藏始终不会被同步用于推荐。")
-  :state.people.length?state.people.map(u=>{
+function renderPeople(){
+  const target=$("discover-list");
+  if(!state.user){
+    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">♡</div>'+
+      '<span class="overline">START WITH A REAL PROFILE</span>'+
+      '<h4>先介绍自己，再遇见喜欢同样内容的人。</h4>'+
+      '<p>不需要上传私人收藏。注册后选择想公开的几条视频、填写兴趣并开启被发现，真实的同好才会出现在这里。</p>'+
+      '<button class="button button-primary" data-action="login">登录 / 创建我的资料</button></div>';
+    return;
+  }
+  if(!state.people.length){
+    target.innerHTML='<div class="meet-empty"><div class="meet-empty-symbol">✧</div>'+
+      '<span class="overline">NO FAKE MATCHES</span><h4>这里暂时还没有合适的同好。</h4>'+
+      '<p>不会用机器人或虚构头像填满列表。试着主动公开几条有代表性的视频，并在「我的」资料里开启被发现。</p>'+
+      '<div class="card-actions"><button class="button button-primary" data-action="showcase">分享我的精选</button>'+
+      '<button class="button button-soft" data-action="login">完善个人资料</button></div></div>';
+    return;
+  }
+  target.innerHTML=state.people.map((u,index)=>{
     const match=u.match||{sharedVideos:[],sharedTags:[],sharedTopics:[],score:0};
-    return '<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml((u.displayName||"?").slice(0,1))+'</div>'+
-      '<div><h4>'+escapeHtml(u.displayName)+'</h4><span class="match-score">'+
-      match.score+' 分 · 共同公开视频 '+match.sharedVideos.length+' 条</span></div></div>'+
-      '<p>@'+escapeHtml(u.handle)+(u.city?" · "+escapeHtml(u.city):"")+'</p><p>'+escapeHtml(u.bio||"这个人还没有填写简介")+'</p>'+
-      '<div class="tags">'+tagsHtml(match.sharedTopics.concat(match.sharedTags))+'</div>'+
-      '<p>精选收藏：'+escapeHtml(u.showcase.map(s=>s.title).slice(0,3).join(" · "))+'</p>'+
-      '<div class="card-actions"><button class="highlight" data-action="request" data-id="'+u.id+'"'+(u.relationship!=="none"?" disabled":"")+'>'+
-      (u.relationship==="none"?"申请交友":u.relationship==="accepted"?"已是好友":"已申请")+'</button>'+
-      '<button data-action="report" data-id="'+u.id+'">举报</button><button data-action="block" data-id="'+u.id+'">拉黑</button></div></article>';
-  }).join(""):empty("暂时没有可发现的人","其他用户需要主动公开收藏并开启被发现功能。这里不会创建虚拟匹配对象。");
+    const common=[...new Set([...(match.sharedTopics||[]),...(match.sharedTags||[])])];
+    const shared=(match.sharedVideos||[])[0];
+    const sharedTitle=shared?u.showcase?.find(video=>video.bvid===shared)?.title:"";
+    const reason=sharedTitle?"你们都分享过《"+sharedTitle+"》":
+      common.length?"你们都喜欢 "+common.slice(0,2).join("、"):
+      "喜欢的公开视频有交集";
+    const sharedVideos=(match.sharedVideos||[]).length;
+    const title=escapeHtml(u.displayName||u.handle||"用户");
+    const first=title.slice(0,1);
+    const primary=u.relationship==="accepted"?
+      '<button class="highlight" data-action="chat" data-id="'+u.id+'" data-name="'+title+'">♡ 去聊天 →</button>':
+      '<button class="highlight" data-action="request" data-id="'+u.id+'"'+
+      (u.relationship!=="none"?" disabled":"")+'>'+
+      (u.relationship==="none"?"♡ 申请认识":u.relationship==="accepted"?"已经是好友":"已发送申请")+'</button>';
+    return '<article class="person-card meet-card"><div class="meet-card-banner '+posterTheme(u.id)+'">'+
+      '<span class="meet-number">同好发现 / '+String(index+1).padStart(2,"0")+'</span>'+
+      '<span class="meet-quote">“'+escapeHtml(reason)+'”</span>'+
+      '<span class="meet-common">✦ '+sharedVideos+' 条共同分享的视频 · '+common.length+' 个共同话题</span></div>'+
+      '<div class="meet-card-body"><div class="person-header"><div class="avatar social-avatar">'+first+'</div>'+
+      '<div class="meet-identity"><h4>'+title+'</h4><span>@'+escapeHtml(u.handle)+
+      (u.city?' · '+escapeHtml(u.city):"")+'</span></div><span class="meet-heart" aria-hidden="true">♡</span></div>'+
+      '<p class="meet-bio">'+escapeHtml(u.bio||"很高兴在这里遇见喜欢相似视频的人。")+'</p>'+
+      '<div class="tags">'+tagsHtml(common)+'</div>'+
+      '<details class="public-picks"><summary>看看 TA 主动分享的视频</summary><ul>'+
+      (u.showcase||[]).slice(0,5).map(x=>'<li><a href="https://www.bilibili.com/video/'+
+        encodeURIComponent(x.bvid)+'" target="_blank" rel="noopener noreferrer">'+
+        escapeHtml(x.title)+'</a></li>').join("")+'</ul></details>'+
+      '<div class="card-actions meet-actions">'+primary+'</div>'+
+      '<details class="safety-options"><summary>更多 · 隐私与安全</summary>'+
+      '<button data-action="report" data-id="'+u.id+'">举报</button>'+
+      '<button data-action="block" data-id="'+u.id+'">拉黑</button></details></div></article>';
+  }).join("");
 }
-function renderConnections() {
+function renderConnections(){
   const connections=state.connections;
   const incoming=connections.filter(c=>c.status==="pending" && c.direction==="incoming").length;
   $("pending-count").hidden=incoming===0;
   $("pending-count").textContent=String(incoming);
-  $("friends-list").innerHTML=!state.user?empty("请先登录","只有双方同意才能建立联系。"):connections.length?
-    connections.map(c=>'<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml(c.peer.displayName.slice(0,1))+'</div><div><h4>'+
-      escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
-      '<p>'+ (c.status==="accepted"?"已成为好友":c.direction==="incoming"?"对方向你发来交友申请":"等待对方接受申请")+'</p><div class="card-actions">'+
-      (c.status==="pending"&&c.direction==="incoming"?'<button class="highlight" data-action="accept" data-id="'+c.id+'">同意</button><button data-action="decline" data-id="'+c.id+'">拒绝</button>':"")+
-      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button>'+
-      '<button data-action="study" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">结伴学习</button>'+
-      '<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
-      '<button data-action="block" data-id="'+c.peer.id+'">拉黑</button><button data-action="report" data-id="'+c.peer.id+'">举报</button></div></article>').join("")
-    :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
-  $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
+  if(!state.user){
+    $("friends-list").innerHTML=empty("登录后，这里才是你们的对话","只有双方同意才能发消息。私人片单可以继续离线使用。");
+  }else if(!connections.length){
+    $("friends-list").innerHTML='<div class="meet-empty message-empty"><span class="meet-empty-symbol">✉</span>'+
+      '<span class="overline">MAKE THE FIRST CONNECTION</span><h4>还没有新的对话。</h4>'+
+      '<p>去遇见页面，找到有共同视频或兴趣的人，发一条友善的交友申请。只有对方同意后才能聊天。</p>'+
+      '<button class="button button-primary" data-action="discover">去遇见同好 →</button></div>';
+  }else{
+    $("friends-list").innerHTML=connections.map(c=>{
+      const peer=c.peer||{},display=escapeHtml(peer.displayName||peer.handle||"朋友");
+      const info=c.status==="accepted"?"你们已成为好友 · 可以聊天与结伴学习":
+        c.direction==="incoming"?"TA 向你发来了交友申请":"已发出申请，等待对方同意";
+      return '<article class="person-card connection-card"><div class="person-header">'+
+        '<div class="avatar social-avatar">'+display.slice(0,1)+'</div><div class="meet-identity"><h4>'+
+        display+'</h4><span>@'+escapeHtml(peer.handle||"")+'</span><p>'+info+'</p></div></div>'+
+        '<div class="card-actions connection-actions">'+
+        (c.status==="pending"&&c.direction==="incoming"?
+          '<button class="highlight" data-action="accept" data-id="'+c.id+'">♡ 接受申请</button>'+
+          '<button data-action="decline" data-id="'+c.id+'">暂不接受</button>':"")+
+        (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+peer.id+
+          '" data-name="'+display+'">✉ 开始聊天</button>'+
+          '<button data-action="study" data-id="'+peer.id+'" data-name="'+display+'">◫ 结伴共学</button>':"")+
+        '</div><details class="safety-options"><summary>关系管理</summary>'+
+        (c.status==="accepted"?'<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
+        '<button data-action="block" data-id="'+peer.id+'">拉黑</button>'+
+        '<button data-action="report" data-id="'+peer.id+'">举报</button></details></article>';
+    }).join("");
+  }
+  $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+
+    ' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
 }
 function clearSocialSession(){
   state.sessionEpoch++;
   state.user=null;state.people=[];state.connections=[];state.blocked=[];
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
+  state.communityFeed=[];state.communityStatus="loading";
+  if($("community-list"))renderCommunityFeed();
   state.messageCursor=null;
   if($("unread-count"))$("unread-count").hidden=true;
   if($("load-older"))$("load-older").hidden=true;
@@ -417,9 +581,10 @@ function renderChat() {
   $("chat-panel").hidden=!state.chatPeer;
   if(!state.chatPeer)return;
   $("chat-heading").textContent="与 "+state.chatPeer.name+" 的对话";
-  $("chat-list").innerHTML=state.chatMessages.map(m=>
+  $("chat-list").innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
-    '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join("");
+    '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join(""):
+    '<div class="chat-welcome">✦ 还没有消息。聊聊最近看到的好视频吧，第一句话由你决定。</div>';
   $("load-older").hidden=!state.messageCursor;
   $("chat-list").scrollTop=$("chat-list").scrollHeight;
 }
@@ -535,6 +700,10 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
+    if(action==="import"){$("import-file").click();return;}
+    if(action==="discover"){setTab("discover");return;}
+    if(action==="showcase"){setTab("showcase");return;}
+    if(action==="login"){setTab("account");return;}
     if(action==="toggle")return await updateShowcaseDraft(id);
     if(action==="watched"){
       const item=state.items.find(x=>x.bvid===id);
@@ -598,11 +767,16 @@ async function actionHandler(event) {
       await refreshStudyPlans();
       notify(decision==="toggle"?"已更新你的共学进度。":"共学计划状态已更新。");
     }else if(action==="request"){
-      await api("/connections","POST",{targetId:id});notify("已发送交友申请。");await refreshPeople();
+      await api("/connections","POST",{targetId:id});
+      button.disabled=true;button.textContent="已发送申请";
+      notify("已发出申请；对方接受后才能聊天。");
+      await refreshPeople();
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
+      setTab("friends");
       await openChat({id,name:button.dataset.name});
+      $("chat-panel").scrollIntoView({behavior:"smooth",block:"nearest"});
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
       await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
@@ -622,6 +796,25 @@ async function actionHandler(event) {
 function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
+  for(const id of ["discover-from-hero","feed-meet-cta","feed-connection-cta"]){
+    $(id).onclick=()=>setTab("discover");
+  }
+  $("meet-profile-cta").onclick=()=>setTab("account");
+  $("share-next-profile").onclick=()=>setTab("account");
+  $("refresh-community").onclick=refreshCommunityFeed;
+  $("feed-channels").addEventListener("click",event=>{
+    const button=event.target.closest("button[data-feed-tag]");
+    if(!button)return;
+    state.feedTag=button.dataset.feedTag;
+    state.page=1;
+    renderLocal();
+  });
+  document.querySelectorAll("button[data-chat-prompt]").forEach(button=>{
+    button.onclick=()=>{
+      $("chat-text").value=button.dataset.chatPrompt;
+      $("chat-text").focus();
+    };
+  });
   $("import-trigger").onclick=()=>$("import-file").click();
   $("import-bfc-local").onclick=async()=>{
     const button=$("import-bfc-local");
@@ -846,6 +1039,7 @@ async function init() {
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
   await refreshNotifications();
+  await refreshCommunityFeed();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
     if(!state.user || document.visibilityState!=="visible")return;

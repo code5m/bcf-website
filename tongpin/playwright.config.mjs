@@ -2,10 +2,10 @@ import {defineConfig,devices} from "@playwright/test";
 import {resolve} from "node:path";
 export default defineConfig({
   testDir:"./e2e",
-  timeout:90000,
-  expect:{timeout:15000},
+  timeout:40000,
+  expect:{timeout:8000},
   workers:1,
-  retries:1,
+  retries:0,
   reporter:"list",
   use:{baseURL:"http://127.0.0.1:4173",trace:"retain-on-failure",...devices["Desktop Chrome"]},
   webServer:{

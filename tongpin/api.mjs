@@ -440,6 +440,26 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {user});
         return true;
       }
+      if (method === "GET" && path === "/feed") {
+        limit(req,"public-feed",60,60000);
+        const db=await read();
+        let viewer=null;
+        try{viewer=auth(db,req);}catch{}
+        // Only actively discoverable, non-suspended users who expressly published a
+        // showcase appear here. No private IndexedDB or non-public profile data.
+        const curated=db.users.filter(user=>user.profile?.discoverable &&
+          Array.isArray(user.showcase)&&user.showcase.length>0 &&
+          !(user.suspendedUntil&&new Date(user.suspendedUntil).getTime()>Date.now()) &&
+          (!viewer || (viewer.id!==user.id&&!peersBlocked(viewer,user))))
+          .flatMap(user=>user.showcase.slice(0,20).map(item=>({
+            bvid:item.bvid,title:item.title,tags:item.tags||[],caption:item.caption||"",
+            source:"user-curated",curator:{
+              id:user.id,displayName:user.profile.displayName,handle:user.handle
+            }
+          }))).slice(0,48);
+        json(res,200,{items:curated});
+        return true;
+      }
       if (method === "GET" && path === "/people") {
         limit(req, "discovery", 60, 60000);
         const db = await read();
