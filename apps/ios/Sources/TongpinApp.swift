@@ -128,6 +128,7 @@ struct PortableArchive: Codable {
         let categories=lib["categories"] as? [String:String] ?? [:]
         let notes=lib["notes"] as? [String:String] ?? [:]
         let watched=lib["watched"] as? [String:Bool] ?? [:]
+        let progressByVideo=lib["progress"] as? [String:Any] ?? [:]
         let entries=root["videos"] ?? root["records"] ?? root["items"]
         let rows:[[String:Any]]
         if let list=entries as? [[String:Any]]{rows=list}
@@ -146,7 +147,14 @@ struct PortableArchive: Codable {
         var group:[String:[String]]=[:]
         for rawTopic in sourceTopics{
             guard let name=rawTopic["name"] as? String,!name.isEmpty else{continue}
-            let items=(rawTopic["items"] as? [String] ?? []).compactMap{Self.parseBV($0)}
+            let members=rawTopic["items"] as? [Any] ?? []
+            let items=members.compactMap{ entry -> String? in
+                if let value=entry as? String{return Self.parseBV(value)}
+                if let object=entry as? [String:Any]{
+                    return Self.parseBV(object["bvid"] as? String ?? object["url"] as? String ?? "")
+                }
+                return nil
+            }
             let chapters=rawTopic["chapters"] as? [String] ?? []
             let item=PortableTopic(name:name,description:rawTopic["description"] as? String ?? "",
                 notes:rawTopic["notes"] as? String ?? "",chapters:chapters,items:items,
@@ -179,7 +187,9 @@ struct PortableArchive: Codable {
                 author:old?.author ?? row["author"] as? String ?? "",
                 topics:allTopics,sourceFolders:allFolders,
                 watched:(old?.watched ?? false)||(watched[id] ?? false)||(row["watched"] as? Bool ?? false),
-                progress:old?.progress ?? (row["progress"] as? Double),
+                progress:old?.progress ??
+                    ((progressByVideo[id] as? [String:Any])?["percent"] as? Double) ??
+                    (row["progress"] as? Double),
                 metadataMissing:title.hasPrefix("待补齐标题"))
         }
         if byID.count>30000{
@@ -213,8 +223,8 @@ struct PortableArchive: Codable {
                 names[topic.name]=PortableTopic(name:old.name,
                     description:old.description.isEmpty ? topic.description:old.description,
                     notes:old.notes.isEmpty ? topic.notes:old.notes,
-                    chapters:Array(Set(old.chapters+topic.chapters)),
-                    items:Array(Set(old.items+topic.items)),
+                    chapters:old.chapters+topic.chapters.filter{!old.chapters.contains($0)},
+                    items:old.items+topic.items.filter{!old.items.contains($0)},
                     sections:topic.sections.merging(old.sections){_,existing in existing})
             }else{names[topic.name]=topic}
         }

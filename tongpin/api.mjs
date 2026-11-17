@@ -579,7 +579,10 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         const pending=db.connections.filter(c=>c.to===me.id&&c.status==="pending"&&!peersBlocked(me,byId(db,c.from))).length;
         const studyInvites=db.studyPlans.filter(p=>p.partnerId===me.id&&p.status==="pending"&&
           connected(db,p.creatorId,me.id)).length;
-        const unread=store.unreadForUser(me.id,db.readStates);
+        const unread=store.unreadForUser(me.id,db.readStates).filter(item=>{
+          const peer=db.users.find(u=>u.id===item.peerId);
+          return peer&&!peersBlocked(me,peer)&&connected(db,me.id,peer.id);
+        });
         json(res,200,{pending,studyInvites,unread,total:pending+studyInvites+unread.reduce((sum,p)=>sum+p.count,0)});
         return true;
       }
