@@ -110,8 +110,13 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
   let serial = Promise.resolve();
   const rate = new Map();
   async function read() { return store.read({excludeMessages:true}); }
+  async function serialized(action){
+    const task=serial.then(action);
+    serial=task.catch(()=>{});
+    return task;
+  }
   async function transaction(action) {
-    const task=serial.then(async()=>{
+    return serialized(async()=>{
       const db=store.begin();
       try {
         const result=await action(db);
@@ -120,8 +125,6 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return result;
       }catch(error){store.rollback();throw error;}
     });
-    serial=task.catch(()=>{});
-    return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
     const remote=String(req.socket.remoteAddress || "local");
@@ -619,13 +622,13 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
       if (method === "POST" && path === "/messages") {
         limit(req, "messages", 40, 60000);
         const input = await methodBody(req);
-        const message = await transaction(db => {
-          const me = auth(db, req), peer = byId(db, input.peerId);
-          if (peersBlocked(me, peer) || !connected(db, me.id, peer.id)) fail(403, "friendship_required");
-          const text = cleanText(input.text, 1000);
-          if (!text) fail(400, "message_required");
-          const msg = {id: randomUUID(), from: me.id, to: peer.id, text, createdAt: new Date().toISOString()};
-          db.messages.push(msg);
+        const message = await serialized(async()=>{
+          const db=await read(),me=auth(db,req),peer=byId(db,input.peerId);
+          if(peersBlocked(me,peer)||!connected(db,me.id,peer.id))fail(403,"friendship_required");
+          const text=cleanText(input.text,1000);
+          if(!text)fail(400,"message_required");
+          const msg={id:randomUUID(),from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
+          store.appendMessage(msg);
           return msg;
         });
         json(res, 201, {message});

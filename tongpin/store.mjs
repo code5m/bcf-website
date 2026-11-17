@@ -131,6 +131,11 @@ export class SocialStore{
       predicate+' ORDER BY created_at DESC,id DESC LIMIT ?').all(...params).map(r=>JSON.parse(r.payload));
     return {messages:rows.slice(0,page).reverse(),hasMore:rows.length>page};
   }
+  appendMessage(record){
+    if(!record?.id || !record.from || !record.to)throw Error("invalid_message");
+    this.db.prepare("INSERT INTO messages(id,owner,peer,created_at,status,payload) VALUES(?,?,?,?,?,?)")
+      .run(record.id,record.from,record.to,record.createdAt,"",JSON.stringify(record));
+  }
   messagesForUser(userId){
     return this.db.prepare("SELECT payload FROM messages WHERE owner=? OR peer=? ORDER BY created_at ASC,id ASC")
       .all(userId,userId).map(r=>JSON.parse(r.payload));
