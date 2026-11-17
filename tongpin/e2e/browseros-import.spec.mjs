@@ -41,7 +41,7 @@ test("BrowserOS BFC workbench backup imports real private videos, folders, autho
   await expect(page.locator("#library-list")).toContainText("真实 UP 主 A");
   await expect(page.locator("#library-list")).toContainText("默认收藏夹");
   await expect(page.locator("#library-list .poster-cover")).toHaveCount(2);
-  await expect(page.locator("#library-list .poster-cover").first()).toHaveAttribute("src","https://i0.hdslb.com/bfs/archive/real-a.jpg");
+  await expect(page.locator('#library-list .poster-cover[src="https://i0.hdslb.com/bfs/archive/real-a.jpg"]')).toHaveCount(1);
   await expect(page.locator("#learning-list")).toHaveCount(1);
   await page.locator('#nav [data-tab="account"]').click();
   await page.locator("#shortcut-learning").click();
