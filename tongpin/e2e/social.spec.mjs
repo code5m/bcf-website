@@ -183,12 +183,12 @@ test("switching social accounts does not retain the old account's visible profil
     await page.locator("#auth-submit").click();
     await expect(page.locator("#session-label")).toHaveText("@"+name);
   };
-  await make("switch_alice_"+Date.now().toString(36));
+  await make("a_"+Date.now().toString(36));
   await page.locator("#logout").click();
   await expect(page.locator("#session-label")).toHaveText("离线私人模式");
   await expect(page.locator("#chat-panel")).toBeHidden();
   await expect(page.locator("#unread-count")).toBeHidden();
-  await make("switch_bob_"+Date.now().toString(36));
+  await make("b_"+Date.now().toString(36));
   await page.locator("[data-tab=friends]").click();
   await expect(page.locator("#friends-list")).toContainText("还没有好友");
   await page.locator("[data-tab=learning]").click();
