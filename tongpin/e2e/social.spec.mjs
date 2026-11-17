@@ -100,6 +100,7 @@ test("visitor can use private library without registering and sees no fabricated
 });
 
 test("BFC JSON imports topics, restores learning progress, and exports private backup",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
   await page.goto("/tongpin/");
   const payload={type:"workbench_backup",state:{
     videos:{"BV1234567890":{bvid:"BV1234567890",title:"电影后期入门",author:"创作者"}},
