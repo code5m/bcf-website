@@ -36,3 +36,22 @@
 .study-goal span{font-size:13px;flex:1;overflow-wrap:anywhere}
 .study-goal small{font-size:10px;color:var(--muted);text-align:right;white-space:nowrap}
 .stacked-form select{background:#0e1628;border:1px solid #33415e;color:var(--text);padding:12px;border-radius:10px;width:100%}
+
+
+/* Keep useful content visible above the fold on phones. */
+@media(max-width:600px){
+  .main-area{padding-top:14px}
+  .topbar{margin-bottom:14px}
+  .topbar h1{font-size:21px}
+  .hero{min-height:0;padding:20px;border-radius:16px}
+  .hero h2{font-size:28px;line-height:1.21;margin:10px 0}
+  .hero p{font-size:12px;line-height:1.6;margin-bottom:14px}
+  .hero-art{display:none}
+  .hero-actions{gap:7px}
+  .hero-actions .button{padding:8px 11px;font-size:12px}
+  .stats{margin:13px 0 21px}
+  .stats article{padding:10px}
+  .section-heading{margin:20px 0 12px}
+  .section-heading h3{font-size:21px}
+  .local-bridge-status{font-size:12px}
+}
