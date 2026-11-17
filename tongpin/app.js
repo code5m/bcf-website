@@ -324,19 +324,31 @@ function renderCommunityFeed(){
       '">♡ 申请认识 TA</button></div></div></article>';
   }).join("");
 }
-async function refreshCommunityFeed(){
+let communityRequest=null,communityRequestEpoch=-1;
+async function refreshCommunityFeed(force=false){
+  // The public list does not change on every tab switch: reuse a fresh result
+  // and deduplicate overlapping requests to avoid unnecessary network chatter.
+  if(!force&&state.communityStatus==="loaded"&&
+      Date.now()-state.communityLoadedAt<45000)return;
+  if(communityRequest&&communityRequestEpoch===state.sessionEpoch)return communityRequest;
   const epoch=state.sessionEpoch;
-  try{
-    const result=await api("/feed");
-    if(epoch!==state.sessionEpoch)return;
-    state.communityFeed=result.items||[];
-    state.communityStatus="loaded";
-  }catch{
-    if(epoch!==state.sessionEpoch)return;
-    state.communityFeed=[];
-    state.communityStatus="offline";
-  }
-  renderCommunityFeed();
+  communityRequestEpoch=epoch;
+  const task=(async()=>{
+    try{
+      const result=await api("/feed");
+      if(epoch!==state.sessionEpoch)return;
+      state.communityFeed=result.items||[];
+      state.communityStatus="loaded";
+      state.communityLoadedAt=Date.now();
+    }catch{
+      if(epoch!==state.sessionEpoch)return;
+      // Keep known public entries during a transient outage instead of a flash.
+      if(!state.communityFeed.length)state.communityStatus="offline";
+    }
+    if(epoch===state.sessionEpoch)renderCommunityFeed();
+  })().finally(()=>{if(communityRequest===task)communityRequest=null;});
+  communityRequest=task;
+  return task;
 }
 let pendingLibraryFrame=0;
 // Search/pagination must not rebuild the entire page or 30k-item learning topics.
@@ -465,12 +477,21 @@ function renderStudyPlans() {
   }).join("");
 }
 async function refreshStudyPlans(){
-  if(!state.user){state.studyPlans=[];renderStudyPlans();return;}
+  if(!state.user){state.studyPlans=[];state.studySnapshot="";renderStudyPlans();return;}
   const epoch=state.sessionEpoch,owner=state.user.id;
-  try{const plans=(await api("/study/plans")).plans;
-    if(epoch===state.sessionEpoch && state.user?.id===owner)state.studyPlans=plans;
-  }catch(error){state.studyPlans=[];notify(error.message,true);}
-  renderStudyPlans();
+  try{
+    const plans=(await api("/study/plans")).plans;
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    const snapshot=JSON.stringify(plans);
+    if(snapshot!==state.studySnapshot){
+      state.studyPlans=plans;
+      state.studySnapshot=snapshot;
+      renderStudyPlans();
+    }
+  }catch{
+    // Transient offline states must not erase an existing study plan mid-session.
+    if(!state.studySnapshot)renderStudyPlans();
+  }
 }
 
 function renderAuth() {
@@ -662,17 +683,27 @@ async function refreshPeople() {
   }catch(e){state.people=[];notify(e.message,true);}
   renderPeople();
 }
-async function refreshConnections() {
-  if(!state.user){state.connections=[];state.blocked=[];renderConnections();return;}
+async function refreshConnections(){
+  if(!state.user){
+    state.connections=[];state.blocked=[];state.connectionsSnapshot="";
+    renderConnections();
+    return;
+  }
   const epoch=state.sessionEpoch,owner=state.user.id;
-  try {
+  try{
     const response=await api("/connections");
-    if(epoch===state.sessionEpoch&&state.user?.id===owner){
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    const snapshot=JSON.stringify([response.connections,response.blocked||[]]);
+    if(snapshot!==state.connectionsSnapshot){
       state.connections=response.connections;
       state.blocked=response.blocked||[];
+      state.connectionsSnapshot=snapshot;
+      renderConnections();
     }
-  }catch(e){state.connections=[];state.blocked=[];notify(e.message,true);}
-  renderConnections();
+  }catch{
+    // Don't blank an inbox whenever a background poll briefly fails.
+    if(!state.connectionsSnapshot)renderConnections();
+  }
 }
 async function updateShowcaseDraft(bvid) {
   const pos=state.showcase.findIndex(x=>x.bvid===bvid);
@@ -850,7 +881,7 @@ function wire() {
   }
   $("meet-profile-cta").onclick=()=>setTab("account");
   $("share-next-profile").onclick=()=>setTab("account");
-  $("refresh-community").onclick=refreshCommunityFeed;
+  $("refresh-community").onclick=()=>refreshCommunityFeed(true);
   $("feed-channels").addEventListener("click",event=>{
     const button=event.target.closest("button[data-feed-tag]");
     if(!button)return;
