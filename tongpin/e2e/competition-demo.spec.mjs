@@ -49,6 +49,7 @@ test("contest journey: videos, shared favorite, consent, chat, reply and study",
 
 test("entering and exiting demonstration never changes real private favorites",async({page})=>{
   await page.goto("/tongpin/");
+  await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
   await expect(page.locator("#stat-count")).toHaveText("0");
   await page.locator("#import-file").setInputFiles({name:"private.json",mimeType:"application/json",
     buffer:Buffer.from(JSON.stringify({type:"tongpin_private_library",version:3,
