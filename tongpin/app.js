@@ -10,7 +10,6 @@ const errors = {
   account_suspended:"当前账号已暂停社交操作，可导出数据或申请删除。",
   invalid_credentials:"用户名或密码错误。",
   handle_taken:"用户名已被使用，请换一个。",
-  invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
   adult_and_terms_required:"使用社交功能需要年满 18 岁并同意条款。",
   publish_showcase_first:"请先精选至少一个视频并发布橱窗。",
   showcase_limit_20:"公开橱窗最多支持 20 条视频。",
@@ -21,7 +20,12 @@ const errors = {
   too_many_requests:"操作太频繁，请稍后重试。",
   same_origin_required:"安全验证未通过，请刷新页面后重试。",
   publish_requires_login:"请先登录，才可以发布收藏橱窗。",
-  local_storage_unavailable:"浏览器本地存储不可用，请使用支持 IndexedDB 的浏览器。"
+  local_storage_unavailable:"浏览器本地存储不可用，请使用支持 IndexedDB 的浏览器。",
+  invalid_import_file:"JSON 备份格式错误，请使用同频或 BFC 的备份。",
+  invalid_handle_or_password:"用户名需 3–20 位英文/数字/下划线，密码至少 12 位。",
+  invalid_password:"密码验证失败。",
+  invalid_or_duplicate_video:"橱窗包含重复或不合法 BV 视频。",
+  session_changed:"密码已更新，请重新登录。"
 };
 function notify(text, isError = false) {
   const box = $("notice");
@@ -31,7 +35,7 @@ function notify(text, isError = false) {
 }
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
-  chatPeer: null, chatMessages: [], tab: "library", page: 1, authMode: "register"
+  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false
 };
 let db;
 function openLocal() {
@@ -83,6 +87,8 @@ async function saveShowcase() {
 async function refreshLocal() {
   state.items = (await txGetAll("videos")).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
   state.showcase = (await txGet("settings","showcase"))?.value || [];
+  state.topics = (await txGet("settings","topics"))?.value || [];
+  state.localReady=true;
   renderLocal();
 }
 async function api(path,method="GET",payload) {
@@ -105,7 +111,7 @@ async function loadSession() {
   renderAuth();
 }
 function setTab(tab) {
-  if(!["library","showcase","discover","friends","account"].includes(tab))tab="library";
+  if(!["library","learning","showcase","discover","friends","account"].includes(tab))tab="library";
   state.tab=tab;
   document.querySelectorAll("[data-tab]").forEach(el=>{
     el.classList.toggle("active",el.dataset.tab===tab);
@@ -113,8 +119,9 @@ function setTab(tab) {
   });
   document.querySelectorAll(".panel-section").forEach(el=>el.hidden=el.id!=="tab-"+tab);
   $("page-title").textContent=({
-    library:"我的收藏",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
+    library:"我的收藏",learning:"学习专题",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
   })[tab];
+  if(tab==="learning")renderLearning();
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
   if(tab==="showcase")renderShowcase();
@@ -161,12 +168,42 @@ function renderLocal() {
   $("page-prev").disabled=state.page===1;
   $("page-next").disabled=state.page>=pages;
   renderShowcase();
+  renderLearning();
 }
 function renderShowcase() {
   const items=state.showcase;
+  $("published-summary").textContent=state.user?.showcase?.length
+    ? "服务器已公开 "+state.user.showcase.length+" 条精选收藏；当前浏览器草稿 "+items.length+" 条。编辑草稿不会自动改变公开内容。"
+    : "服务器尚未公开任何精选收藏，当前草稿 "+items.length+" 条。";
   $("showcase-list").innerHTML=items.length?items.map(x=>cardHtml(x,"showcase")).join("")
     :empty("公开橱窗还没有草稿","在「我的收藏」里选择你愿意公开的视频。");
 }
+
+function renderLearning() {
+  const videos=new Map(state.items.map(item=>[item.bvid,item]));
+  const savedTopics=state.topics.filter(t=>t && typeof t.name==="string" && Array.isArray(t.items));
+  const topics=savedTopics.length?savedTopics:
+    [...new Set(state.items.flatMap(item=>item.tags||[]))].slice(0,24).map(tag=>({
+      name:tag, items:state.items.filter(item=>(item.tags||[]).includes(tag)).map(item=>item.bvid)
+    }));
+  const el=$("learning-list");
+  if(!topics.length){el.innerHTML=empty("还没有学习专题","可以导入 BFC 备份，或先为私人收藏添加标签。");return;}
+  el.innerHTML=topics.slice(0,36).map((topic,index)=>{
+    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))].map(id=>videos.get(id)).filter(Boolean);
+    const done=selected.filter(x=>x.watched).length;
+    const percentage=selected.length?Math.round(done/selected.length*100):0;
+    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">LEARNING TRACK '+(index+1)+'</span><h4>'+
+      escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
+      '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
+      '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
+      (selected.length?'<div class="topic-videos">'+selected.slice(0,12).map(v=>'<div class="topic-video">'+
+        '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
+        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
+        (selected.length>12?'<p class="small-copy">本专题共 '+selected.length+' 条；这里只显示前12条。</p>':"")+'</div>':
+        '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
+  }).join("");
+}
+
 function renderAuth() {
   const logged=Boolean(state.user);
   $("session-label").textContent=logged?"@"+state.user.handle:"离线私人模式";
@@ -188,6 +225,7 @@ function renderAuthMode() {
   $("auth-mode-register").classList.toggle("active",register);
   $("auth-mode-login").classList.toggle("active",!register);
   $("display-name-field").hidden=!register;
+  $("invite-field").hidden=!register;
   $("adult-field").hidden=!register;
   $("auth-submit").textContent=register?"创建账号":"登录";
   $("auth-form").elements.password.autocomplete=register?"new-password":"current-password";
@@ -209,6 +247,9 @@ function renderPeople() {
 }
 function renderConnections() {
   const connections=state.connections;
+  const incoming=connections.filter(c=>c.status==="pending" && c.direction==="incoming").length;
+  $("pending-count").hidden=incoming===0;
+  $("pending-count").textContent=String(incoming);
   $("friends-list").innerHTML=!state.user?empty("请先登录","只有双方同意才能建立联系。"):connections.length?
     connections.map(c=>'<article class="person-card"><div class="person-header"><div class="avatar">'+escapeHtml(c.peer.displayName.slice(0,1))+'</div><div><h4>'+
       escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
@@ -269,26 +310,43 @@ async function persistVideo(input) {
   await refreshLocal();
 }
 async function importFile(file) {
-  if(file.size>20_000_000)throw new Error("导入文件超过 20MB 限制");
-  const parsed=JSON.parse(await file.text());
-  const {items,rejected,duplicates}=normalizeImported(parsed);
+  if (file.size>20_000_000) throw new Error("导入文件超过 20MB 限制");
+  await importPayload(JSON.parse(await file.text()));
+}
+async function importPayload(parsed) {
+  const {items,rejected,duplicates,topics,showcaseDraft,metadataOnly,warnings}=normalizeImported(parsed);
   if(!items.length)throw new Error("未识别到有效 BV 视频，请导入 BFC 的 JSON 备份");
   const previous=new Map(state.items.map(i=>[i.bvid,i]));
   const merged=items.map(item=>{
     const old=previous.get(item.bvid);
     return old?{
-      ...old,tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
+      ...old,title:old.metadataMissing&&!item.metadataMissing?item.title:old.title,
+      metadataMissing:Boolean(old.metadataMissing&&item.metadataMissing),
+      watched:Boolean(old.watched||item.watched),progress:old.progress??item.progress,
+      topics:[...new Set([...(old.topics||[]),...(item.topics||[])])].slice(0,12),
+      notes:old.notes||item.notes,
+      tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
       sourceFolders:[...new Set([...(old.sourceFolders||[]),...(item.sourceFolders||[])])].slice(0,30),
       updatedAt:new Date().toISOString()
     }:{...item,updatedAt:new Date().toISOString()};
   });
   await txPutMany("videos",merged);
+  if(topics.length){
+    const current=(await txGet("settings","topics"))?.value || [];
+    const byName=new Map([...current,...topics].map(t=>[t.name,t]));
+    await txPutMany("settings",[{key:"topics",value:[...byName.values()].slice(0,100)}]);
+  }
+  if(showcaseDraft && confirm("此文件包含精选橱窗草稿，要恢复这些草稿吗？这不会自动公开。")){
+    state.showcase=showcaseDraft;
+    await saveShowcase();
+  }
   await refreshLocal();
-  notify("导入完成：识别 "+items.length+" 条，文件内去重 "+duplicates+" 条，跳过 "+rejected+" 条。仅保存到本机。");
+  notify("仅在本机导入 "+items.length+" 条；文件内重复 "+duplicates+" 条，跳过 "+rejected+" 条。"+
+    (metadataOnly?" "+metadataOnly+" 条缺少完整视频标题。":"")+(warnings[0]||""));
 }
 function exportLocal() {
-  const data={type:"tongpin_private_library",version:1,exportedAt:new Date().toISOString(),
-    videos:state.items,showcaseDraft:state.showcase};
+  const data={type:"tongpin_private_library",version:2,exportedAt:new Date().toISOString(),
+    videos:state.items,showcaseDraft:state.showcase,topics:state.topics};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
@@ -302,6 +360,13 @@ async function actionHandler(event) {
   const {action,id}=button.dataset;
   try {
     if(action==="toggle")return await updateShowcaseDraft(id);
+    if(action==="watched"){
+      const item=state.items.find(x=>x.bvid===id);
+      if(!item)return;
+      await txPutMany("videos",[{...item,watched:!item.watched,updatedAt:new Date().toISOString()}]);
+      await refreshLocal();
+      return;
+    }
     if(action==="remove"){
       if(!confirm("只删除本浏览器的私人视频记录？不会取消 B站收藏。"))return;
       await txDelete("videos",id);
@@ -350,6 +415,23 @@ function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
   $("import-trigger").onclick=()=>$("import-file").click();
+  $("import-bfc-local").onclick=async()=>{
+    const button=$("import-bfc-local");
+    if(!confirm("从本机 127.0.0.1:4198 读取你已有的 BFC 收藏备份并导入当前浏览器？不会访问 B站，也不会上传到社交服务。"))return;
+    button.disabled=true;
+    try{
+      const res=await fetch("/api/local/bfc-import",{method:"POST",
+        headers:{"X-Tongpin-Request":"1","Origin":location.origin},cache:"no-store"});
+      const data=await res.json();
+      if(!res.ok)throw Error(data.detail ? "本机 BFC 不可用："+data.detail : "请启动本机 BFC 工作台服务（默认4198）。");
+      await importPayload(data);
+    }catch(e){notify(e.message,true);}
+    finally{button.disabled=false;}
+  };
+  if(!["127.0.0.1","localhost"].includes(location.hostname)){
+    $("import-bfc-local").hidden=true;
+    $("local-bridge-status").textContent="当前是远程或移动端模式：请选择本地 JSON 备份手动导入，绝不远程访问你的 BFC 私人服务。";
+  }
   $("export-trigger").onclick=exportLocal;
   $("import-file").onchange=async e=>{
     try{const file=e.target.files[0];if(file)await importFile(file);}catch(err){notify(err.message,true);}
@@ -370,6 +452,13 @@ function wire() {
     }catch(err){notify(err.message,true);}
   };
   document.body.addEventListener("click",actionHandler);
+  $("unpublish-showcase").onclick=async()=>{
+    if(!state.user){setTab("account");return;}
+    if(!confirm("确认撤下服务端全部公开收藏？本机橱窗草稿会保留，方便日后重新发布。"))return;
+    try{state.user=(await api("/showcase","PUT",{items:[]})).user;
+      renderAuth();renderLocal();notify("已撤下所有公开收藏并关闭可发现性。");}
+    catch(e){notify(e.message,true);}
+  };
   $("publish-showcase").onclick=async()=>{
     if(!state.user){setTab("account");notify("请先登录，之后再发布精选收藏。");return;}
     if(!confirm("确认公开当前 "+state.showcase.length+" 条精选视频的标题、BV 号和标签？私人笔记不会上传。"))return;
@@ -417,6 +506,19 @@ function wire() {
       notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");
     }catch(e){notify(e.message,true);}
   };
+  $("password-form").onsubmit=async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,values=new FormData(form);
+    try{
+      await api("/account/password","PUT",{
+        currentPassword:values.get("currentPassword"),
+        newPassword:values.get("newPassword")
+      });
+      form.reset();
+      await loadSession();
+      notify("密码已修改，其他设备会话已退出。请妥善保管新密码。");
+    }catch(e){notify(e.message,true);}
+  };
   $("logout").onclick=async()=>{
     try {await api("/logout","POST",{});state.user=null;state.people=[];state.connections=[];state.chatPeer=null;
       renderAuth();renderLocal();setTab("library");notify("已退出。私人收藏仍留在当前浏览器。");}
@@ -449,6 +551,17 @@ async function init() {
   try {db=await openLocal();await refreshLocal();}
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
+  // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
+  window.setInterval(async()=>{
+    if(!state.user || document.visibilityState!=="visible")return;
+    if(state.tab==="friends"){
+      await refreshConnections();
+      if(state.chatPeer){
+        try{state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;renderChat();}
+        catch{/* Friendship may have been revoked: next user action displays the error. */}
+      }
+    }
+  },10000);
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/tongpin/sw.js",{scope:"/tongpin/"}).catch(()=>{});
   }
