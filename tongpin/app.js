@@ -36,7 +36,7 @@ function notify(text, isError = false) {
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[]
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null
 };
 let db;
 function openLocal() {
@@ -64,6 +64,87 @@ function txGet(store, key) {
     const request = db.transaction(store,"readonly").objectStore(store).get(key);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+function atomicLocalImport(items, topics, draft) {
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(["videos","settings"],"readwrite");
+    const videos=tx.objectStore("videos"), settings=tx.objectStore("settings");
+    const priorRows=videos.getAll(),priorTopics=settings.get("topics"),priorDraft=settings.get("showcase");
+    let launched=false;
+    function schedule(){
+      if(launched || priorRows.readyState!=="done" || priorTopics.readyState!=="done" || priorDraft.readyState!=="done")return;
+      launched=true;
+      try{
+        const oldItems=priorRows.result;
+        const oldTopics=priorTopics.result?.value || [];
+        const oldShowcase=priorDraft.result?.value || [];
+        const previous=new Map(oldItems.map(item=>[item.bvid,item]));
+        const now=new Date().toISOString();
+        for(const item of items){
+          const old=previous.get(item.bvid);
+          const newer=old?{
+            ...old,title:old.metadataMissing&&!item.metadataMissing?item.title:old.title,
+            metadataMissing:Boolean(old.metadataMissing&&item.metadataMissing),
+            watched:Boolean(old.watched||item.watched),progress:old.progress??item.progress,
+            topics:[...new Set([...(old.topics||[]),...(item.topics||[])])].slice(0,12),
+            notes:old.notes||item.notes,
+            tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
+            sourceFolders:[...new Set([...(old.sourceFolders||[]),...(item.sourceFolders||[])])].slice(0,30),
+            updatedAt:now
+          }:{...item,updatedAt:now};
+          videos.put(newer);
+        }
+        const byName=new Map(oldTopics.map(t=>[t.name,t]));
+        for(const incoming of topics){
+          const existing=byName.get(incoming.name);
+          if(!existing){byName.set(incoming.name,incoming);continue;}
+          byName.set(incoming.name,{
+            ...incoming,...existing,name:existing.name,
+            description:existing.description||incoming.description,
+            notes:existing.notes||incoming.notes,
+            chapters:[...new Set([...(existing.chapters||[]),...(incoming.chapters||[])])],
+            items:[...new Set([...(existing.items||[]),...(incoming.items||[])])],
+            sections:{...(incoming.sections||{}),...(existing.sections||{})}
+          });
+        }
+        if(byName.size>100)throw Error("专题超过100个，请拆分备份再导入");
+        settings.put({key:"lastImportUndo",value:{videos:oldItems,topics:oldTopics,showcase:oldShowcase}});
+        settings.put({key:"topics",value:[...byName.values()]});
+        if(draft!==null)settings.put({key:"showcase",value:draft});
+      }catch(error){tx.abort();reject(error);}
+    }
+    for(const request of [priorRows,priorTopics,priorDraft]) request.onsuccess=schedule;
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+    tx.onabort=()=>reject(tx.error||new Error("import_aborted"));
+  });
+}
+function restoreLastImport(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(["videos","settings"],"readwrite");
+    const videos=tx.objectStore("videos"), settings=tx.objectStore("settings");
+    const prior=settings.get("lastImportUndo");
+    prior.onsuccess=()=>{
+      if(!prior.result?.value){tx.abort();reject(new Error("没有可恢复的导入记录"));return;}
+      const {videos:oldVideos,topics,showcase}=prior.result.value;
+      videos.clear();
+      for(const item of oldVideos)videos.put(item);
+      settings.put({key:"topics",value:topics});
+      settings.put({key:"showcase",value:showcase});
+      settings.delete("lastImportUndo");
+    };
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+}
+function clearPrivateLibrary(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(["videos","settings"],"readwrite");
+    tx.objectStore("videos").clear();
+    tx.objectStore("settings").delete("topics");
+    tx.objectStore("settings").delete("showcase");
+    tx.objectStore("settings").delete("lastImportUndo");
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
 }
 function txPutMany(store, values) {
@@ -106,9 +187,12 @@ async function api(path,method="GET",payload) {
   if(!res.ok)throw new Error(errors[data.error]||"请求失败："+(data.error||res.status));
   return data;
 }
-async function loadSession() {
-  try { state.user=(await api("/session")).user; }
-  catch { state.user=null; }
+async function loadSession(){
+  const previous=state.user?.id;
+  let session=null;
+  try{session=(await api("/session")).user;}catch{}
+  if(previous!==session?.id)clearSocialSession();
+  state.user=session;
   renderAuth();
 }
 function setTab(tab) {
@@ -126,6 +210,7 @@ function setTab(tab) {
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
   if(tab==="showcase")renderShowcase();
+  if(tab==="account")refreshAppeals();
 }
 function tagsHtml(tags) {
   return (tags||[]).slice(0,8).map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join("");
@@ -197,10 +282,18 @@ function renderLearning() {
       escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
       '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
       '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
-      (selected.length?'<div class="topic-videos">'+selected.slice(0,12).map(v=>'<div class="topic-video">'+
+      (selected.length?'<div class="topic-videos">'+
+        (topic.notes?'<p class="small-copy">专题笔记：'+escapeHtml(topic.notes.slice(0,240))+'</p>':"")+
+        (Array.isArray(topic.chapters)&&topic.chapters.length?'<p class="small-copy">章节：'+topic.chapters.map(escapeHtml).join(" · ")+'</p>':"")+
+        selected.slice(0,12).map(v=>'<div class="topic-video">'+
         '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
-        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
-        (selected.length>12?'<p class="small-copy">本专题共 '+selected.length+' 条；这里只显示前12条。</p>':"")+'</div>':
+        '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid] || "未分章节")+'</small>'+
+        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div></div>').join("")+
+        (selected.length>12?'<details class="topic-overflow"><summary>展开剩余 '+(selected.length-12)+' 条视频</summary>'+
+        selected.slice(12).map(v=>'<div class="topic-video"><button data-action="watched" data-id="'+v.bvid+
+          '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+
+          '</button><a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
+        '</details>':"")+'</div>':
         '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
   }).join("");
 }
@@ -233,7 +326,10 @@ function renderStudyPlans() {
 }
 async function refreshStudyPlans(){
   if(!state.user){state.studyPlans=[];renderStudyPlans();return;}
-  try{state.studyPlans=(await api("/study/plans")).plans;}catch(error){notify(error.message,true);}
+  const epoch=state.sessionEpoch,owner=state.user.id;
+  try{const plans=(await api("/study/plans")).plans;
+    if(epoch===state.sessionEpoch && state.user?.id===owner)state.studyPlans=plans;
+  }catch(error){state.studyPlans=[];notify(error.message,true);}
   renderStudyPlans();
 }
 
@@ -252,6 +348,14 @@ function renderAuth() {
     form.elements.city.value=state.user.city||"";
     form.elements.discoverable.checked=Boolean(state.user.discoverable);
   }
+}
+async function refreshAppeals(){
+  if(!state.user)return;
+  try{
+    const result=await api("/appeals");
+    $("appeal-history").textContent=result.appeals.map(a=>
+      a.createdAt+" · "+a.status+" · "+(a.resolution||"尚无审核结论")).join("\n")||"暂无申诉";
+  }catch{$("appeal-history").textContent="申诉暂时无法读取";}
 }
 function renderAuthMode() {
   const register=state.authMode==="register";
@@ -295,6 +399,20 @@ function renderConnections() {
     :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
   $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
 }
+function clearSocialSession(){
+  state.sessionEpoch++;
+  state.user=null;state.people=[];state.connections=[];state.blocked=[];
+  state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
+  state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
+  state.messageCursor=null;
+  if($("unread-count"))$("unread-count").hidden=true;
+  if($("load-older"))$("load-older").hidden=true;
+  if($("recovery-codes-output"))$("recovery-codes-output").textContent="";
+  if($("chat-panel")){renderChat();}
+  if($("discover-list"))renderPeople();
+  if($("friends-list"))renderConnections();
+  if($("study-plans"))renderStudyPlans();
+}
 function renderChat() {
   $("chat-panel").hidden=!state.chatPeer;
   if(!state.chatPeer)return;
@@ -302,20 +420,51 @@ function renderChat() {
   $("chat-list").innerHTML=state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
     '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join("");
+  $("load-older").hidden=!state.messageCursor;
   $("chat-list").scrollTop=$("chat-list").scrollHeight;
+}
+
+async function refreshNotifications(){
+  if(!state.user){state.unread=0;$("unread-count").hidden=true;return;}
+  const epoch=state.sessionEpoch,owner=state.user.id;
+  try{
+    const result=await api("/notifications");
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    state.unread=result.total||0;
+    const badge=$("unread-count");
+    badge.hidden=!state.unread;
+    badge.textContent=state.unread>99?"99+":String(state.unread);
+  }catch{}
+}
+async function openChat(peer){
+  state.chatPeer=peer;
+  const owner=state.user?.id,epoch=state.sessionEpoch;
+  const result=await api("/messages?peer="+encodeURIComponent(peer.id));
+  if(owner!==state.user?.id||epoch!==state.sessionEpoch)return;
+  state.chatMessages=result.messages;
+  state.messageCursor=result.nextCursor||null;
+  renderChat();
+  await api("/messages/read","POST",{peerId:peer.id});
+  await refreshNotifications();
 }
 async function refreshPeople() {
   if(!state.user){state.people=[];renderPeople();return;}
-  try {state.people=(await api("/people")).people;}catch(e){notify(e.message,true);}
+  const epoch=state.sessionEpoch,owner=state.user.id;
+  try {const people=(await api("/people")).people;
+    if(epoch===state.sessionEpoch&&state.user?.id===owner)state.people=people;
+  }catch(e){state.people=[];notify(e.message,true);}
   renderPeople();
 }
 async function refreshConnections() {
   if(!state.user){state.connections=[];state.blocked=[];renderConnections();return;}
+  const epoch=state.sessionEpoch,owner=state.user.id;
   try {
     const response=await api("/connections");
-    state.connections=response.connections;
-    state.blocked=response.blocked||[];
-  }catch(e){notify(e.message,true);}
+    if(epoch===state.sessionEpoch&&state.user?.id===owner){
+      state.connections=response.connections;
+      state.blocked=response.blocked||[];
+    }
+  }catch(e){state.connections=[];state.blocked=[];notify(e.message,true);}
   renderConnections();
 }
 async function updateShowcaseDraft(bvid) {
@@ -351,36 +500,20 @@ async function importFile(file) {
 async function importPayload(parsed) {
   const {items,rejected,duplicates,topics,showcaseDraft,metadataOnly,warnings}=normalizeImported(parsed);
   if(!items.length)throw new Error("未识别到有效 BV 视频，请导入 BFC 的 JSON 备份");
-  const previous=new Map(state.items.map(i=>[i.bvid,i]));
-  const merged=items.map(item=>{
-    const old=previous.get(item.bvid);
-    return old?{
-      ...old,title:old.metadataMissing&&!item.metadataMissing?item.title:old.title,
-      metadataMissing:Boolean(old.metadataMissing&&item.metadataMissing),
-      watched:Boolean(old.watched||item.watched),progress:old.progress??item.progress,
-      topics:[...new Set([...(old.topics||[]),...(item.topics||[])])].slice(0,12),
-      notes:old.notes||item.notes,
-      tags:[...new Set([...(old.tags||[]),...(item.tags||[])])].slice(0,12),
-      sourceFolders:[...new Set([...(old.sourceFolders||[]),...(item.sourceFolders||[])])].slice(0,30),
-      updatedAt:new Date().toISOString()
-    }:{...item,updatedAt:new Date().toISOString()};
-  });
-  await txPutMany("videos",merged);
-  if(topics.length){
-    const current=(await txGet("settings","topics"))?.value || [];
-    const byName=new Map([...current,...topics].map(t=>[t.name,t]));
-    await txPutMany("settings",[{key:"topics",value:[...byName.values()].slice(0,100)}]);
-  }
-  if(showcaseDraft && confirm("此文件包含精选橱窗草稿，要恢复这些草稿吗？这不会自动公开。")){
-    state.showcase=showcaseDraft;
-    await saveShowcase();
-  }
+  const conflicts=topics.filter(t=>state.topics.some(old=>old.name===t.name)).length;
+  const restoreDraft=showcaseDraft && confirm("备份包含精选橱窗草稿，恢复到本机吗？不会自动公开。");
+  const yes=confirm("准备在本机导入 "+items.length+" 条视频、"+topics.length+" 个专题。"+
+    (conflicts?"其中 "+conflicts+" 个同名专题会保留现有笔记与顺序并合并新内容。":"")+
+    "导入前会保存一个可撤销快照。确认继续？");
+  if(!yes)return;
+  await atomicLocalImport(items,topics,restoreDraft?showcaseDraft:null);
   await refreshLocal();
-  notify("仅在本机导入 "+items.length+" 条；文件内重复 "+duplicates+" 条，跳过 "+rejected+" 条。"+
-    (metadataOnly?" "+metadataOnly+" 条缺少完整视频标题。":"")+(warnings[0]||""));
+  notify("安全导入成功："+items.length+" 条视频、"+topics.length+" 个专题；"+
+    "重复 "+duplicates+"、跳过 "+rejected+"；"+(metadataOnly?"缺标题 "+metadataOnly+"。":"")+
+    (warnings[0]||"")+" 可点击「撤销上次导入」回滚。");
 }
 function exportLocal() {
-  const data={type:"tongpin_private_library",version:2,exportedAt:new Date().toISOString(),
+  const data={type:"tongpin_private_library",version:3,exportedAt:new Date().toISOString(),
     videos:state.items,showcaseDraft:state.showcase,topics:state.topics};
   const content=JSON.stringify(data,null,2);
   if (window.TongpinNative?.postMessage) {
@@ -411,9 +544,29 @@ async function actionHandler(event) {
       return;
     }
     if(action==="remove"){
-      if(!confirm("只删除本浏览器的私人视频记录？不会取消 B站收藏。"))return;
-      await txDelete("videos",id);
+      const published=(state.user?.showcase||[]).some(item=>item.bvid===id);
+      if(published && !confirm("该视频还在服务器公开橱窗。删除本地记录前必须先从公开橱窗撤下。是否现在一并撤下？"))return;
+      if(!confirm("确认删除该视频的本地记录与橱窗草稿？此操作不修改 B站上的收藏。"))return;
+      if(published){
+        const next=state.user.showcase.filter(item=>item.bvid!==id);
+        state.user=(await api("/showcase","PUT",{items:next})).user;
+        renderAuth();
+      }
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction(["videos","settings"],"readwrite");
+        const settings=tx.objectStore("settings");
+        tx.objectStore("videos").delete(id);
+        const localDraft=state.showcase.filter(item=>item.bvid!==id);
+        settings.put({key:"showcase",value:localDraft});
+        const topics=state.topics.map(topic=>({
+          ...topic,items:(topic.items||[]).filter(bvid=>bvid!==id),
+          sections:Object.fromEntries(Object.entries(topic.sections||{}).filter(([bvid])=>bvid!==id))
+        }));
+        settings.put({key:"topics",value:topics});
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
       await refreshLocal();
+      notify(published?"已从服务器公开橱窗撤下，并删除本地记录。":"已删除本地记录和草稿。");
       return;
     }
     if(action==="edit"){
@@ -446,9 +599,7 @@ async function actionHandler(event) {
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
     }else if(action==="chat"){
-      state.chatPeer={id,name:button.dataset.name};
-      state.chatMessages=(await api("/messages?peer="+encodeURIComponent(id))).messages;
-      renderChat();
+      await openChat({id,name:button.dataset.name});
     }else if(action==="block"){
       if(!confirm("确认拉黑？你们将不能继续匹配或聊天，已有好友关系会解除。"))return;
       await api("/blocks","POST",{targetId:id});notify("已拉黑。");state.chatPeer=null;renderChat();await refreshConnections();await refreshPeople();
@@ -487,6 +638,17 @@ function wire() {
     $("local-bridge-status").textContent="当前是远程或移动端模式：请选择本地 JSON 备份手动导入，绝不远程访问你的 BFC 私人服务。";
   }
   $("export-trigger").onclick=exportLocal;
+  $("undo-import").onclick=async()=>{
+    if(!confirm("恢复到上一次导入前的本地收藏快照？导入之后新增的本地修改会一并撤销。"))return;
+    try{await restoreLastImport();await refreshLocal();notify("已恢复到上次导入之前。");}
+    catch(error){notify(error.message,true);}
+  };
+  $("clear-private").onclick=async()=>{
+    if(!confirm("这将清空当前浏览器里的全部私人收藏、专题、笔记和橱窗草稿；不会删除服务器上的公开橱窗。请先导出备份。"))return;
+    if(!confirm("最后确认：永久清除本设备全部私人收藏数据？"))return;
+    try{await clearPrivateLibrary();await refreshLocal();notify("本设备私人收藏库已清空。已发布橱窗仍需单独撤下。");}
+    catch(error){notify(error.message,true);}
+  };
   $("import-file").onchange=async e=>{
     try{const file=e.target.files[0];if(file)await importFile(file);}catch(err){notify(err.message,true);}
     e.target.value="";
@@ -535,7 +697,8 @@ function wire() {
       body.acceptTerms=body.adult;
     }
     try {
-      state.user=(await api(state.authMode==="register"?"/register":"/login","POST",body)).user;
+      const result=await api(state.authMode==="register"?"/register":"/login","POST",body);
+      clearSocialSession();state.user=result.user;
       renderAuth();renderLocal();setTab("account");notify("账户已登录。你的私人收藏仍只留在浏览器。");
       form.reset();
     }catch(e){notify(e.message,true);}
@@ -560,6 +723,36 @@ function wire() {
       notify("社交账户数据已导出。请妥善保管，其中包含消息和公开资料。");
     }catch(e){notify(e.message,true);}
   };
+  $("recovery-codes-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      const response=await api("/account/recovery-codes","POST",{password:fields.get("password")});
+      $("recovery-codes-output").textContent=response.codes.join("\n");
+      event.currentTarget.reset();
+      notify("已生成8个一次性恢复码。请立即在安全位置保存，之后无法再次查看明文。");
+    }catch(error){notify(error.message,true);}
+  };
+  $("recover-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/account/recover","POST",{handle:fields.get("handle"),code:fields.get("code"),
+        newPassword:fields.get("newPassword")});
+      event.currentTarget.reset();
+      notify("密码已重置，所有既有会话已失效。请重新登录。");
+    }catch(error){notify(error.message,true);}
+  };
+  $("appeal-form").onsubmit=async event=>{
+    event.preventDefault();
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/appeals","POST",{details:fields.get("details")});
+      event.currentTarget.reset();
+      notify("已提交申诉，等待人工审核。");
+      await refreshAppeals();
+    }catch(error){notify(error.message,true);}
+  };
   $("password-form").onsubmit=async event=>{
     event.preventDefault();
     const form=event.currentTarget,values=new FormData(form);
@@ -574,7 +767,7 @@ function wire() {
     }catch(e){notify(e.message,true);}
   };
   $("logout").onclick=async()=>{
-    try {await api("/logout","POST",{});state.user=null;state.people=[];state.connections=[];state.chatPeer=null;
+    try {await api("/logout","POST",{});clearSocialSession();
       renderAuth();renderLocal();setTab("library");notify("已退出。私人收藏仍留在当前浏览器。");}
     catch(e){notify(e.message,true);}
   };
@@ -582,7 +775,7 @@ function wire() {
     if(!confirm("将永久删除社交账号、公开橱窗、好友和消息。此操作不删除浏览器私人收藏。确定继续？"))return;
     const password=prompt("输入账号密码以确认永久删除：");
     if(password===null)return;
-    try {await api("/account","DELETE",{password});state.user=null;state.chatPeer=null;renderAuth();renderLocal();setTab("library");notify("社交账户已删除。私人收藏仍在本浏览器。");}
+    try {await api("/account","DELETE",{password});clearSocialSession();renderAuth();renderLocal();setTab("library");notify("社交账户已删除。私人收藏仍在本浏览器。");}
     catch(e){notify(e.message,true);}
   };
   $("cancel-study").onclick=()=>{$("study-dialog").close();state.studyTarget=null;};
@@ -612,7 +805,18 @@ function wire() {
       notify("举报已提交审核。你也可以直接拉黑对方。");
     }catch(e){notify(e.message,true);}
   };
-  $("close-chat").onclick=()=>{state.chatPeer=null;renderChat();};
+  $("load-older").onclick=async()=>{
+    if(!state.chatPeer||!state.messageCursor)return;
+    try{
+      const result=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id)+
+        "&before="+encodeURIComponent(state.messageCursor));
+      const seen=new Set(state.chatMessages.map(m=>m.id));
+      state.chatMessages=[...result.messages.filter(m=>!seen.has(m.id)),...state.chatMessages];
+      state.messageCursor=result.nextCursor||null;
+      renderChat();
+    }catch(error){notify(error.message,true);}
+  };
+  $("close-chat").onclick=()=>{state.chatPeer=null;state.chatMessages=[];state.messageCursor=null;renderChat();};
   $("chat-form").onsubmit=async event=>{
     event.preventDefault();
     if(!state.chatPeer)return;
@@ -621,8 +825,7 @@ function wire() {
     try {
       await api("/messages","POST",{peerId:state.chatPeer.id,text});
       $("chat-text").value="";
-      state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;
-      renderChat();
+      await openChat(state.chatPeer);
     }catch(e){notify(e.message,true);}
   };
 }
@@ -632,14 +835,21 @@ async function init() {
   try {db=await openLocal();await refreshLocal();}
   catch(e){notify(errors.local_storage_unavailable,true);$("import-trigger").disabled=true;$("add-trigger").disabled=true;return;}
   await loadSession();
+  await refreshNotifications();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
     if(!state.user || document.visibilityState!=="visible")return;
     if(state.tab==="learning")await refreshStudyPlans();
+    await refreshNotifications();
     if(state.tab==="friends"){
       await refreshConnections();
       if(state.chatPeer){
-        try{state.chatMessages=(await api("/messages?peer="+encodeURIComponent(state.chatPeer.id))).messages;renderChat();}
+        try{
+          const response=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id));
+          const seen=new Set(state.chatMessages.map(m=>m.id));
+          state.chatMessages=[...state.chatMessages,...response.messages.filter(m=>!seen.has(m.id))];
+          renderChat();
+        }
         catch{/* Friendship may have been revoked: next user action displays the error. */}
       }
     }

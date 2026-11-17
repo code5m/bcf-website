@@ -1,5 +1,15 @@
 name: Tongpin Docker Production Packaging Check
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'scripts/**'
+      - 'apps/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'Dockerfile'
@@ -8,6 +18,7 @@ on:
       - 'deploy/**'
       - 'tongpin/**'
       - 'server.mjs'
+      - 'scripts/**'
       - '.github/workflows/deploy-ci.yml'
   workflow_dispatch:
 concurrency:

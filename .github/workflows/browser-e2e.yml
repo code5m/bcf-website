@@ -1,5 +1,15 @@
 name: Tongpin Browser E2E
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tongpin/**'
+      - 'server.mjs'
+      - 'scripts/**'
+      - 'apps/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.github/workflows/**'
   pull_request:
     paths: ['tongpin/**','server.mjs','.github/workflows/browser-e2e.yml']
   workflow_dispatch:

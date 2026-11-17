@@ -7,100 +7,251 @@ struct SavedVideo: Codable, Identifiable, Hashable {
     var title: String
     var tags: [String]
     var notes: String
+    var author: String
+    var topics: [String]
+    var sourceFolders: [String]
+    var watched: Bool
+    var progress: Double?
+    var metadataMissing: Bool
     var id: String { bvid }
+
+    init(bvid: String, title: String, tags: [String], notes: String,
+         author: String = "", topics: [String] = [], sourceFolders: [String] = [],
+         watched: Bool = false, progress: Double? = nil, metadataMissing: Bool = false) {
+        self.bvid=bvid;self.title=title;self.tags=tags;self.notes=notes
+        self.author=author;self.topics=topics;self.sourceFolders=sourceFolders
+        self.watched=watched;self.progress=progress;self.metadataMissing=metadataMissing
+    }
+    init(from decoder:Decoder) throws {
+        let c=try decoder.container(keyedBy:CodingKeys.self)
+        bvid=try c.decode(String.self,forKey:.bvid)
+        title=try c.decodeIfPresent(String.self,forKey:.title) ?? "待补齐标题 · "+bvid
+        tags=try c.decodeIfPresent([String].self,forKey:.tags) ?? []
+        notes=try c.decodeIfPresent(String.self,forKey:.notes) ?? ""
+        author=try c.decodeIfPresent(String.self,forKey:.author) ?? ""
+        topics=try c.decodeIfPresent([String].self,forKey:.topics) ?? []
+        sourceFolders=try c.decodeIfPresent([String].self,forKey:.sourceFolders) ?? []
+        watched=try c.decodeIfPresent(Bool.self,forKey:.watched) ?? false
+        progress=try c.decodeIfPresent(Double.self,forKey:.progress)
+        metadataMissing=try c.decodeIfPresent(Bool.self,forKey:.metadataMissing) ?? false
+    }
+}
+struct PortableTopic: Codable {
+    var name: String
+    var description: String
+    var notes: String
+    var chapters: [String]
+    var items: [String]
+    var sections: [String:String]
+    init(name:String,description:String="",notes:String="",chapters:[String]=[],
+         items:[String]=[],sections:[String:String]=[:]) {
+        self.name=name;self.description=description;self.notes=notes
+        self.chapters=chapters;self.items=items;self.sections=sections
+    }
+    init(from decoder:Decoder) throws {
+        let c=try decoder.container(keyedBy:CodingKeys.self)
+        name=try c.decode(String.self,forKey:.name)
+        description=try c.decodeIfPresent(String.self,forKey:.description) ?? ""
+        notes=try c.decodeIfPresent(String.self,forKey:.notes) ?? ""
+        chapters=try c.decodeIfPresent([String].self,forKey:.chapters) ?? []
+        items=try c.decodeIfPresent([String].self,forKey:.items) ?? []
+        sections=try c.decodeIfPresent([String:String].self,forKey:.sections) ?? [:]
+    }
+}
+struct CuratedVideo: Codable {
+    var bvid:String
+    var title:String
+    var tags:[String]
+    var caption:String
+    var url:String
+}
+struct PortableArchive: Codable {
+    var type: String = "tongpin_private_library"
+    var version: Int = 3
+    var videos: [SavedVideo]
+    var topics: [PortableTopic] = []
+    var showcaseDraft: [CuratedVideo] = []
 }
 
 @MainActor final class PrivateLibrary: ObservableObject {
     @Published private(set) var videos: [SavedVideo] = []
-    private var dataURL: URL {
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    @Published private(set) var topics: [PortableTopic] = []
+    private(set) var drafts: [CuratedVideo] = []
+    private var dataURL:URL {
+        let folder=FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0]
         return folder.appendingPathComponent("tongpin-private-videos.json")
     }
-    init() {
-        guard let data = try? Data(contentsOf: dataURL),
-              let decoded = try? JSONDecoder().decode([SavedVideo].self, from: data) else { return }
-        videos = decoded
-    }
-    func save(_ video: SavedVideo) throws {
-        let item = SavedVideo(bvid: video.bvid, title: String(video.title.prefix(150)),
-                              tags: Array(video.tags.prefix(12)), notes: String(video.notes.prefix(4000)))
-        videos.removeAll { $0.bvid == item.bvid }
-        videos.insert(item, at: 0)
-        try persist()
-    }
-    func remove(_ video: SavedVideo) throws {
-        videos.removeAll { $0.id == video.id }
-        try persist()
-    }
-    func importJSON(_ data: Data) throws -> Int {
-        let raw = try JSONSerialization.jsonObject(with: data)
-        let rows: [[String: Any]]
-        var categories: [String: String] = [:]
-        if let direct = raw as? [[String: Any]] {
-            rows = direct
-        } else {
-            var container: Any = raw
-            if let dictionary = container as? [String: Any] {
-                container = dictionary["state"] ?? dictionary
-            }
-            guard let obj = container as? [String: Any] else {
-                throw NSError(domain:"Tongpin",code:1,userInfo:[NSLocalizedDescriptionKey:"不支持的 JSON 结构"])
-            }
-            let rawVideos = obj["videos"] ?? obj["records"] ?? obj["items"]
-            if let array = rawVideos as? [[String: Any]] {
-                rows = array
-            } else if let dictionary = rawVideos as? [String: Any] {
-                rows = dictionary.values.compactMap { $0 as? [String: Any] }
-            } else {
-                throw NSError(domain:"Tongpin",code:2,userInfo:[NSLocalizedDescriptionKey:"找不到视频记录"])
-            }
-            categories = (obj["library"] as? [String: Any])?["categories"] as? [String: String] ?? [:]
+    init(){
+        guard let data=try? Data(contentsOf:dataURL) else{return}
+        if let archive=try? JSONDecoder().decode(PortableArchive.self,from:data){
+            videos=archive.videos;topics=archive.topics;drafts=archive.showcaseDraft
+        }else if let legacy=try? JSONDecoder().decode([SavedVideo].self,from:data){
+            videos=legacy
         }
-        guard rows.count <= 30000 else {
-            throw NSError(domain:"Tongpin",code:3,userInfo:[NSLocalizedDescriptionKey:"一次最多导入30000条"])
-        }
-        var byID = Dictionary(uniqueKeysWithValues: videos.map { ($0.bvid, $0) })
-        var imported = 0
-        for row in rows {
-            let source = row["bvid"] as? String ?? row["url"] as? String ?? ""
-            guard let id = Self.parseBV(source) else { continue }
-            let title = row["title"] as? String ?? "视频 " + id
-            let old = byID[id]
-            let sourceTags = row["tags"] as? [String] ?? []
-            let topic = categories[id] ?? (row["category"] as? String ?? "")
-            let tags = Array(Set((old?.tags ?? []) + sourceTags + (topic.isEmpty ? [] : [topic]))).sorted().prefix(12)
-            let notes = old?.notes ?? (row["notes"] as? String ?? "")
-            byID[id] = SavedVideo(bvid:id,title:String(title.prefix(150)),tags:Array(tags),
-                                  notes:String(notes.prefix(4000)))
-            imported += 1
-        }
-        videos = byID.values.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
-        try persist()
-        return imported
     }
-    private func persist() throws {
-        let dir = dataURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at:dir, withIntermediateDirectories:true)
-        let data = try JSONEncoder().encode(videos)
-        try data.write(to:dataURL, options:[.atomic,.completeFileProtectionUnlessOpen])
+    private func persist(_ archive:PortableArchive) throws {
+        let folder=dataURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let data=try JSONEncoder().encode(archive)
+        try data.write(to:dataURL,options:[.atomic,.completeFileProtectionUnlessOpen])
     }
-    static func parseBV(_ input:String) -> String? {
-        guard let range = input.range(of:"BV[0-9A-Za-z]{10}", options:.regularExpression) else { return nil }
-        return String(input[range])
+    func save(_ item:SavedVideo) throws {
+        let cleaned=SavedVideo(bvid:item.bvid,title:String(item.title.prefix(150)),
+            tags:Array(item.tags.prefix(12)),notes:String(item.notes.prefix(4000)),
+            author:item.author,topics:item.topics,sourceFolders:item.sourceFolders,
+            watched:item.watched,progress:item.progress,metadataMissing:item.metadataMissing)
+        var next=videos.filter{$0.bvid != item.bvid}
+        next.insert(cleaned,at:0)
+        try persist(PortableArchive(videos:next,topics:topics,showcaseDraft:drafts))
+        videos=next
+    }
+    func remove(_ item:SavedVideo) throws {
+        let next=videos.filter{$0.id != item.id}
+        try persist(PortableArchive(videos:next,topics:topics,showcaseDraft:drafts))
+        videos=next
+    }
+    func importJSON(_ data:Data) throws -> Int {
+        let raw=try JSONSerialization.jsonObject(with:data)
+        if let archive=try? JSONDecoder().decode(PortableArchive.self,from:data) {
+            try merge(archive)
+            return archive.videos.count
+        }
+        if let simple=try? JSONDecoder().decode([SavedVideo].self,from:data) {
+            try merge(PortableArchive(videos:simple))
+            return simple.count
+        }
+        guard var root=raw as? [String:Any] else {
+            throw NSError(domain:"Tongpin",code:1,userInfo:[NSLocalizedDescriptionKey:"备份 JSON 结构无法识别"])
+        }
+        if let state=root["state"] as? [String:Any]{root=state}
+        let lib=root["library"] as? [String:Any] ?? [:]
+        let categories=lib["categories"] as? [String:String] ?? [:]
+        let notes=lib["notes"] as? [String:String] ?? [:]
+        let watched=lib["watched"] as? [String:Bool] ?? [:]
+        let progressByVideo=lib["progress"] as? [String:Any] ?? [:]
+        let entries=root["videos"] ?? root["records"] ?? root["items"]
+        let rows:[[String:Any]]
+        if let list=entries as? [[String:Any]]{rows=list}
+        else if let map=entries as? [String:Any]{
+            rows=map.map{key,value in
+                var obj=value as? [String:Any] ?? [:]
+                if obj["bvid"] == nil{obj["bvid"]=key}
+                return obj
+            }
+        }else{rows=[]}
+        let sourceTopics=(lib["topics"] ?? root["topics"]) as? [[String:Any]] ?? []
+        if rows.count>30000 || sourceTopics.count>30000{
+            throw NSError(domain:"Tongpin",code:2,userInfo:[NSLocalizedDescriptionKey:"导入记录数量超过限制"])
+        }
+        var newTopics:[PortableTopic]=[]
+        var group:[String:[String]]=[:]
+        for rawTopic in sourceTopics{
+            guard let name=rawTopic["name"] as? String,!name.isEmpty else{continue}
+            let members=rawTopic["items"] as? [Any] ?? []
+            let items=members.compactMap{ entry -> String? in
+                if let value=entry as? String{return Self.parseBV(value)}
+                if let object=entry as? [String:Any]{
+                    return Self.parseBV(object["bvid"] as? String ?? object["url"] as? String ?? "")
+                }
+                return nil
+            }
+            let chapters=rawTopic["chapters"] as? [String] ?? []
+            let item=PortableTopic(name:name,description:rawTopic["description"] as? String ?? "",
+                notes:rawTopic["notes"] as? String ?? "",chapters:chapters,items:items,
+                sections:rawTopic["sections"] as? [String:String] ?? [:])
+            newTopics.append(item)
+            for id in items{group[id,default:[]].append(name)}
+        }
+        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        let additional=Set(group.keys).union(categories.keys).union(notes.keys).union(watched.keys)
+        let combined=rows+additional.map{["bvid":$0]}
+        for row in combined{
+            let rawVideo=row["raw"] as? [String:Any] ?? [:]
+            let source=row["bvid"] as? String ?? rawVideo["bvid"] as? String ??
+                row["url"] as? String ?? ""
+            guard let id=Self.parseBV(source) else{continue}
+            let old=byID[id]
+            let incomingTitle=row["title"] as? String ?? rawVideo["title"] as? String ?? ""
+            let title = (!incomingTitle.isEmpty && !incomingTitle.hasPrefix("待补齐标题")) ? String(incomingTitle.prefix(150)) : (old?.title ?? "待补齐标题 · "+id)
+            let rawTags=row["tags"] as? [String] ?? []
+            let topic=categories[id] ?? row["category"] as? String ?? ""
+            let tags=Array(Set((old?.tags ?? [])+rawTags+(topic.isEmpty ? []:[topic])+(group[id] ?? [])))
+                .sorted().prefix(12)
+            let note=old?.notes.isEmpty == false ? old!.notes :
+                notes[id] ?? row["notes"] as? String ?? ""
+            let folders=row["sourceFolders"] as? [String] ??
+                row["originalFolders"] as? [String] ?? rawVideo["originalFolders"] as? [String] ?? []
+            let allFolders=Array(Set((old?.sourceFolders ?? [])+folders)).sorted()
+            let allTopics=Array(Set((old?.topics ?? [])+(group[id] ?? []))).sorted()
+            byID[id]=SavedVideo(bvid:id,title:title,tags:Array(tags),notes:String(note.prefix(4000)),
+                author:old?.author ?? row["author"] as? String ?? "",
+                topics:allTopics,sourceFolders:allFolders,
+                watched:(old?.watched ?? false)||(watched[id] ?? false)||(row["watched"] as? Bool ?? false),
+                progress:old?.progress ??
+                    ((progressByVideo[id] as? [String:Any])?["percent"] as? Double) ??
+                    (row["progress"] as? Double),
+                metadataMissing:title.hasPrefix("待补齐标题"))
+        }
+        if byID.count>30000{
+            throw NSError(domain:"Tongpin",code:3,userInfo:[NSLocalizedDescriptionKey:"私人收藏超过30000条"])
+        }
+        let archive=PortableArchive(videos:Array(byID.values),
+            topics:newTopics,showcaseDraft:drafts)
+        try merge(archive)
+        return rows.count
+    }
+    private func merge(_ archive:PortableArchive)throws{
+        var byID=Dictionary(uniqueKeysWithValues:videos.map{($0.bvid,$0)})
+        for item in archive.videos{
+            guard Self.parseBV(item.bvid)==item.bvid else{continue}
+            if let previous=byID[item.bvid]{
+                var merged=previous
+                if previous.metadataMissing && !item.metadataMissing{
+                    merged.title=item.title;merged.metadataMissing=false
+                }
+                merged.tags=Array(Set(previous.tags+item.tags)).sorted()
+                merged.topics=Array(Set(previous.topics+item.topics)).sorted()
+                merged.sourceFolders=Array(Set(previous.sourceFolders+item.sourceFolders)).sorted()
+                merged.watched=previous.watched||item.watched
+                if merged.notes.isEmpty{merged.notes=item.notes}
+                byID[item.bvid]=merged
+            }else{byID[item.bvid]=item}
+        }
+        var names=Dictionary(uniqueKeysWithValues:topics.map{($0.name,$0)})
+        for topic in archive.topics{
+            if let old=names[topic.name]{
+                names[topic.name]=PortableTopic(name:old.name,
+                    description:old.description.isEmpty ? topic.description:old.description,
+                    notes:old.notes.isEmpty ? topic.notes:old.notes,
+                    chapters:old.chapters+topic.chapters.filter{!old.chapters.contains($0)},
+                    items:old.items+topic.items.filter{!old.items.contains($0)},
+                    sections:topic.sections.merging(old.sections){_,existing in existing})
+            }else{names[topic.name]=topic}
+        }
+        let all=Array(byID.values).sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+        let allTopics=Array(names.values)
+        let draft=drafts.isEmpty ? archive.showcaseDraft:drafts
+        try persist(PortableArchive(videos:all,topics:allTopics,showcaseDraft:draft))
+        videos=all;topics=allTopics;drafts=draft
+    }
+    static func parseBV(_ input:String)->String?{
+        guard let r=input.range(of:"BV[0-9A-Za-z]{10}",options:.regularExpression)else{return nil}
+        return String(input[r])
     }
 }
 
-struct ExportArchive: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    var videos: [SavedVideo]
-    init(videos:[SavedVideo]) { self.videos=videos }
-    init(configuration:ReadConfiguration) throws {
-        let data=configuration.file.regularFileContents ?? Data()
-        videos=try JSONDecoder().decode([SavedVideo].self,from:data)
+struct ExportArchive:FileDocument {
+    static var readableContentTypes:[UTType]{[.json]}
+    var archive:PortableArchive
+    init(videos:[SavedVideo],topics:[PortableTopic],drafts:[CuratedVideo]){
+        archive=PortableArchive(videos:videos,topics:topics,showcaseDraft:drafts)
     }
-    func fileWrapper(configuration:WriteConfiguration) throws -> FileWrapper {
-        let full = try JSONEncoder().encode(videos)
-        return FileWrapper(regularFileWithContents:full)
+    init(configuration:ReadConfiguration)throws{
+        let data=configuration.file.regularFileContents ?? Data()
+        archive=try JSONDecoder().decode(PortableArchive.self,from:data)
+    }
+    func fileWrapper(configuration:WriteConfiguration)throws->FileWrapper{
+        FileWrapper(regularFileWithContents:try JSONEncoder().encode(archive))
     }
 }
 
@@ -149,7 +300,7 @@ struct SocialWebView: UIViewRepresentable {
         return view
     }
     func updateUIView(_ webView:WKWebView,context:Context) {
-        if webView.url?.host != url.host {
+        if webView.url?.scheme != url.scheme || webView.url?.host != url.host || webView.url?.port != url.port {
             context.coordinator.allowedHost = url.host ?? ""
             webView.load(URLRequest(url:url))
         }
@@ -236,7 +387,7 @@ struct TongpinHome:View {
                         report("导入了 \(count) 条可识别的本地视频记录。")
                     } catch {report("导入失败："+error.localizedDescription)}
                 }
-                .fileExporter(isPresented:$exportFile,document:ExportArchive(videos:library.videos),
+                .fileExporter(isPresented:$exportFile,document:ExportArchive(videos:library.videos,topics:library.topics,drafts:library.drafts),
                               contentType:.json,defaultFilename:"tongpin-private-videos") { result in
                     if case .failure(let error)=result {report("导出失败："+error.localizedDescription)}
                 }

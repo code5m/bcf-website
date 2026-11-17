@@ -4,7 +4,7 @@ import {resolve} from "node:path";
 import {cleanText, cleanTopics, matchPublic, normalizeShowcase} from "./core.js";
 
 const SESSION_AGE = 7 * 86400 * 1000;
-const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: [], studyPlans: []});
+const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: [], studyPlans: [], appeals: [], adminAudit: [], readStates: [], recoveryCodes: []});
 const sha = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
 const publicProfile = user => ({
@@ -109,9 +109,14 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
   const store = new SocialStore(dataDir,empty);
   let serial = Promise.resolve();
   const rate = new Map();
-  async function read() { return store.read(); }
+  async function read() { return store.read({excludeMessages:true}); }
+  async function serialized(action){
+    const task=serial.then(action);
+    serial=task.catch(()=>{});
+    return task;
+  }
   async function transaction(action) {
-    const task=serial.then(async()=>{
+    return serialized(async()=>{
       const db=store.begin();
       try {
         const result=await action(db);
@@ -120,8 +125,6 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         return result;
       }catch(error){store.rollback();throw error;}
     });
-    serial=task.catch(()=>{});
-    return task;
   }
   function limit(req, group, max = 30, windowMs = 60000) {
     const remote=String(req.socket.remoteAddress || "local");
@@ -208,6 +211,94 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {user: user ? ownProfile(user) : null});
         return true;
       }
+      if (method === "POST" && path === "/account/recovery-codes") {
+        limit(req,"recovery-code-create",8,3600000);
+        const input=await methodBody(req);
+        const codes=await transaction(db=>{
+          const me=auth(db,req);
+          if(!passwordValid(String(input.password||""),me.passwordHash))fail(403,"invalid_password");
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==me.id);
+          const codes=Array.from({length:8},()=>randomBytes(12).toString("hex"));
+          for(const code of codes)db.recoveryCodes.push({id:randomUUID(),userId:me.id,codeHash:sha(code)});
+          return codes;
+        });
+        json(res,201,{codes,notice:"Show once and store offline"});
+        return true;
+      }
+      if (method === "POST" && path === "/account/recover") {
+        limit(req,"recovery-use",6,3600000);
+        const input=await methodBody(req);
+        const password=String(input.newPassword||"");
+        const code=String(input.code||"");
+        if(password.length<12||password.length>128)fail(400,"invalid_new_password");
+        if(!/^[a-f0-9]{24}$/.test(code))fail(403,"invalid_recovery_code");
+        await transaction(db=>{
+          const user=db.users.find(u=>u.handle===cleanText(input.handle,30).toLowerCase());
+          const found=user&&(db.recoveryCodes||[]).find(c=>c.userId===user.id&&c.codeHash===sha(code));
+          if(!found)fail(403,"invalid_recovery_code");
+          user.passwordHash=passwordHash(password);
+          db.sessions=db.sessions.filter(s=>s.userId!==user.id);
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==user.id);
+          return true;
+        });
+        json(res,200,{ok:true,reloginRequired:true});
+        return true;
+      }
+      if (method === "POST" && path === "/appeals") {
+        limit(req,"appeal-create",3,86400000);
+        const input=await methodBody(req);
+        const details=cleanText(input.details,1000);
+        if(details.length<15)fail(400,"appeal_too_short");
+        const id=await transaction(db=>{
+          const me=auth(db,req,{allowSuspended:true});
+          if((db.appeals||[]).some(a=>a.userId===me.id&&a.status==="pending"))fail(409,"pending_appeal_exists");
+          const id=randomUUID();
+          db.appeals.push({id,userId:me.id,details,status:"pending",createdAt:new Date().toISOString()});
+          return id;
+        });
+        json(res,201,{id,status:"pending"});
+        return true;
+      }
+      if (method === "GET" && path === "/appeals") {
+        const db=await read(),me=auth(db,req,{allowSuspended:true});
+        json(res,200,{appeals:db.appeals.filter(a=>a.userId===me.id).map(a=>({
+          id:a.id,details:a.details,status:a.status,createdAt:a.createdAt,resolution:a.resolution||null
+        }))});
+        return true;
+      }
+      if (method === "GET" && path === "/moderation/appeals") {
+        verifyAdmin(req);
+        const db=await read();
+        json(res,200,{appeals:db.appeals.slice(-200).map(a=>({
+          ...a,handle:db.users.find(u=>u.id===a.userId)?.handle||"deleted"
+        }))});
+        return true;
+      }
+      if (method === "PUT" && path.startsWith("/moderation/appeals/")) {
+        verifyAdmin(req);
+        const input=await methodBody(req);
+        if(!["accept","reject"].includes(input.action))fail(400,"invalid_appeal_resolution");
+        await transaction(db=>{
+          const appeal=db.appeals.find(x=>x.id===path.split("/").at(-1)&&x.status==="pending");
+          if(!appeal)fail(404,"pending_appeal_not_found");
+          appeal.status=input.action==="accept"?"approved":"rejected";
+          appeal.resolution=cleanText(input.resolution,300);
+          appeal.reviewedAt=new Date().toISOString();
+          const user=db.users.find(u=>u.id===appeal.userId);
+          if(user&&input.action==="accept")user.suspendedUntil=null;
+          db.adminAudit.push({id:randomUUID(),action:"appeal_"+input.action,
+            target:appeal.userId,appealId:appeal.id,createdAt:new Date().toISOString()});
+          return true;
+        });
+        json(res,200,{ok:true});
+        return true;
+      }
+      if (method === "GET" && path === "/moderation/audit") {
+        verifyAdmin(req);
+        const db=await read();
+        json(res,200,{audit:db.adminAudit.slice(-200)});
+        return true;
+      }
       if (method === "PUT" && path === "/account/password") {
         limit(req,"password-change",8,3600000);
         const input=await methodBody(req);
@@ -230,7 +321,10 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res,200,{
           type:"tongpin_social_account_export",exportedAt:new Date().toISOString(),account:ownProfile(me),
           connections:db.connections.filter(c=>c.from===me.id||c.to===me.id),
-          messages:db.messages.filter(m=>m.from===me.id||m.to===me.id),
+          messages:store.messagesForUser(me.id),
+          studyPlans:db.studyPlans.filter(p=>p.creatorId===me.id||p.partnerId===me.id),
+          appeals:db.appeals.filter(a=>a.userId===me.id),
+          readStates:db.readStates.filter(s=>s.userId===me.id),
           reports:db.reports.filter(r=>r.from===me.id)
         },{"Content-Disposition":'attachment; filename="tongpin-social-export.json"'});
         return true;
@@ -269,7 +363,11 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           const r=db.reports.find(x=>x.id===path.slice("/moderation/reports/".length));
           if(!r)fail(404,"report_not_found");
           if(!["dismiss","review","suspend"].includes(input.action))fail(400,"invalid_moderation_action");
+          if(r.reviewed)fail(409,"report_already_reviewed");
           r.reviewed=true;r.resolution=input.action;r.reviewedAt=new Date().toISOString();
+          db.adminAudit ||= [];
+          db.adminAudit.push({id:randomUUID(),action:"report_"+input.action,
+            target:r.target,reportId:r.id,createdAt:new Date().toISOString()});
           if(input.action==="suspend"){
             const u=byId(db,r.target);
             u.suspendedUntil=new Date(Date.now()+7*86400000).toISOString();
@@ -287,6 +385,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           if(!relation)fail(404,"relation_not_found");
           db.connections=db.connections.filter(c=>c.id!==id);
           db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===relation.from&&p.partnerId===relation.to)||(p.creatorId===relation.to&&p.partnerId===relation.from)));
+          db.readStates=(db.readStates||[]).filter(s=>!((s.userId===relation.from&&s.peerId===relation.to)||(s.userId===relation.to&&s.peerId===relation.from)));
           return true;
         });
         json(res,200,{ok:true});
@@ -458,6 +557,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           me.blocked = [...new Set([...(me.blocked || []), peer.id])];
           db.connections = db.connections.filter(c => !(c.from === me.id && c.to === peer.id || c.from === peer.id && c.to === me.id));
           db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===me.id&&p.partnerId===peer.id)||(p.creatorId===peer.id&&p.partnerId===me.id)));
+          db.readStates=(db.readStates||[]).filter(s=>!((s.userId===me.id&&s.peerId===peer.id)||(s.userId===peer.id&&s.peerId===me.id)));
           return true;
         });
         json(res, 200, {ok: true});
@@ -473,26 +573,65 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {ok: true});
         return true;
       }
+      if (method === "GET" && path === "/notifications") {
+        limit(req,"notifications",60,60000);
+        const db=await read(),me=auth(db,req);
+        const pending=db.connections.filter(c=>c.to===me.id&&c.status==="pending"&&!peersBlocked(me,byId(db,c.from))).length;
+        const studyInvites=db.studyPlans.filter(p=>p.partnerId===me.id&&p.status==="pending"&&
+          connected(db,p.creatorId,me.id)).length;
+        const unread=store.unreadForUser(me.id,db.readStates).filter(item=>{
+          const peer=db.users.find(u=>u.id===item.peerId);
+          return peer&&!peersBlocked(me,peer)&&connected(db,me.id,peer.id);
+        });
+        json(res,200,{pending,studyInvites,unread,total:pending+studyInvites+unread.reduce((sum,p)=>sum+p.count,0)});
+        return true;
+      }
+      if (method === "POST" && path === "/messages/read") {
+        const input=await methodBody(req);
+        const at=await transaction(db=>{
+          const me=auth(db,req),peer=byId(db,input.peerId);
+          if(!connected(db,me.id,peer.id)||peersBlocked(me,peer))fail(403,"friendship_required");
+          const last=store.db.prepare("SELECT created_at FROM messages WHERE owner=? AND peer=? ORDER BY created_at DESC,id DESC LIMIT 1").get(peer.id,me.id);
+          if(!last)return null;
+          const state=db.readStates.find(s=>s.userId===me.id&&s.peerId===peer.id);
+          if(state)state.lastReadAt=last.created_at;
+          else db.readStates.push({id:randomUUID(),userId:me.id,peerId:peer.id,lastReadAt:last.created_at});
+          return last.created_at;
+        });
+        json(res,200,{ok:true,lastReadAt:at});
+        return true;
+      }
       if (method === "GET" && path === "/messages") {
         limit(req, "message-read", 80, 60000);
         const db = await read();
         const me = auth(db, req);
         const peer = byId(db, url.searchParams.get("peer"));
         if (peersBlocked(me, peer) || !connected(db, me.id, peer.id)) fail(403, "friendship_required");
-        const messages = db.messages.filter(m => (m.from === me.id && m.to === peer.id || m.from === peer.id && m.to === me.id)).slice(-100);
-        json(res, 200, {messages});
+        const raw=url.searchParams.get("before");
+        let before=null;
+        if(raw){
+          try{
+            const cursor=JSON.parse(Buffer.from(raw,"base64url").toString("utf8"));
+            if(typeof cursor.createdAt!=="string"||!/^[0-9a-f-]{36}$/.test(cursor.id))throw Error();
+            before=cursor;
+          }catch{fail(400,"invalid_cursor");}
+        }
+        const {messages,hasMore}=store.messagesBetween(me.id,peer.id,{limit:50,before});
+        const first=messages[0];
+        const nextCursor=hasMore&&first?Buffer.from(JSON.stringify({createdAt:first.createdAt,id:first.id})).toString("base64url"):null;
+        json(res,200,{messages,nextCursor,hasMore});
         return true;
       }
       if (method === "POST" && path === "/messages") {
         limit(req, "messages", 40, 60000);
         const input = await methodBody(req);
-        const message = await transaction(db => {
-          const me = auth(db, req), peer = byId(db, input.peerId);
-          if (peersBlocked(me, peer) || !connected(db, me.id, peer.id)) fail(403, "friendship_required");
-          const text = cleanText(input.text, 1000);
-          if (!text) fail(400, "message_required");
-          const msg = {id: randomUUID(), from: me.id, to: peer.id, text, createdAt: new Date().toISOString()};
-          db.messages.push(msg);
+        const message = await serialized(async()=>{
+          const db=await read(),me=auth(db,req),peer=byId(db,input.peerId);
+          if(peersBlocked(me,peer)||!connected(db,me.id,peer.id))fail(403,"friendship_required");
+          const text=cleanText(input.text,1000);
+          if(!text)fail(400,"message_required");
+          const msg={id:randomUUID(),from:me.id,to:peer.id,text,createdAt:new Date().toISOString()};
+          store.appendMessage(msg);
           return msg;
         });
         json(res, 201, {message});
@@ -523,6 +662,9 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           db.connections = db.connections.filter(c => c.from !== me.id && c.to !== me.id);
           db.messages = db.messages.filter(m => m.from !== me.id && m.to !== me.id);
           db.studyPlans=(db.studyPlans||[]).filter(p=>p.creatorId!==me.id&&p.partnerId!==me.id);
+          db.readStates=(db.readStates||[]).filter(s=>s.userId!==me.id&&s.peerId!==me.id);
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==me.id);
+          db.appeals=(db.appeals||[]).filter(x=>x.userId!==me.id);
           db.reports = db.reports.filter(r => r.from !== me.id && r.target !== me.id);
           db.users.forEach(u => {u.blocked = (u.blocked || []).filter(id => id !== me.id);});
           return true;
