@@ -130,5 +130,5 @@ fetch('/api/session',{headers:{'X-Tongpin-Local':'1'}}).then(r=>{if(!r.ok)throw 
   state.initialized=true;save();
  }
  menus();refreshCategoryTopics(state,rows);save();navigate();updateOverview();
- return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
+ return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
 }).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198）。没有加载虚构视频；请前往「同频」选择本机导入或手动 JSON 导入。';navigate();});
