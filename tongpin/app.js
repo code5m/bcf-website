@@ -36,7 +36,7 @@ function notify(text, isError = false) {
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [], communityFeed: [], communityStatus:"loading",
   chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
-  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:""
+  studyTarget:null,studyPlans:[],sessionEpoch:0,unread:0,appeals:[],messageCursor:null,feedTag:"",topicVisible:{},communityLoadedAt:0,connectionsSnapshot:"",studySnapshot:""
 };
 let db;
 function openLocal() {
@@ -197,7 +197,9 @@ async function loadSession(){
 }
 function setTab(tab) {
   if(!["library","learning","showcase","discover","friends","account"].includes(tab))tab="library";
+  const changed=state.tab!==tab;
   state.tab=tab;
+  if(changed)window.scrollTo(0,0);
   document.querySelectorAll("[data-tab]").forEach(el=>{
     el.classList.toggle("active",el.dataset.tab===tab);
     el.setAttribute("aria-current",el.dataset.tab===tab?"page":"false");
@@ -233,8 +235,9 @@ function videoPoster(item,large=false){
     '<span class="poster-kicker">TONGPIN / CURATED</span>'+
     '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
     '<span class="poster-play" aria-hidden="true">▶</span>'+
-    '<span class="poster-bottom"><strong>'+escapeHtml(item.title)+'</strong>'+
-    '<small>打开 B站原视频 ↗</small></span></a>';
+    '<span class="poster-bottom">'+
+    (large?'<strong>'+escapeHtml(item.title)+'</strong>':'')+
+    '<small>在 B站观看 ↗</small></span></a>';
 }
 function cardHtml(item,place){
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
@@ -266,8 +269,8 @@ function renderFeed(){
     (tag?"# "+escapeHtml(tag):"全部视频")+'</button>').join("");
   const filtered=state.feedTag?state.items.filter(item=>(item.tags||[]).includes(state.feedTag)):state.items;
   $("feed-status").textContent=state.items.length?
-    "你的私人视频流 · "+filtered.length+" 条"+(state.feedTag?" · 话题 #"+state.feedTag:"")+" · 视频在 B站原站观看":
-    "先导入你真正喜欢的视频。这里不展示虚构影片，也不会自动公开私人收藏。";
+    filtered.length+" 条私人视频 · 在 B站观看"+(state.feedTag?" · #"+state.feedTag:""):
+    "导入私人片单，或看看大家公开分享的视频。";
   const item=filtered[0];
   if(!item){
     $("feed-feature").innerHTML='<div class="spotlight-empty"><span class="spotlight-spark" aria-hidden="true">▶</span>'+
@@ -321,21 +324,58 @@ function renderCommunityFeed(){
       '">♡ 申请认识 TA</button></div></div></article>';
   }).join("");
 }
-async function refreshCommunityFeed(){
+let communityRequest=null,communityRequestEpoch=-1;
+async function refreshCommunityFeed(force=false){
+  // The public list does not change on every tab switch: reuse a fresh result
+  // and deduplicate overlapping requests to avoid unnecessary network chatter.
+  if(!force&&state.communityStatus==="loaded"&&
+      Date.now()-state.communityLoadedAt<45000)return;
+  if(communityRequest&&communityRequestEpoch===state.sessionEpoch)return communityRequest;
   const epoch=state.sessionEpoch;
-  try{
-    const result=await api("/feed");
-    if(epoch!==state.sessionEpoch)return;
-    state.communityFeed=result.items||[];
-    state.communityStatus="loaded";
-  }catch{
-    if(epoch!==state.sessionEpoch)return;
-    state.communityFeed=[];
-    state.communityStatus="offline";
-  }
-  renderCommunityFeed();
+  communityRequestEpoch=epoch;
+  const task=(async()=>{
+    try{
+      const result=await api("/feed");
+      if(epoch!==state.sessionEpoch)return;
+      state.communityFeed=result.items||[];
+      state.communityStatus="loaded";
+      state.communityLoadedAt=Date.now();
+    }catch{
+      if(epoch!==state.sessionEpoch)return;
+      // Keep known public entries during a transient outage instead of a flash.
+      if(!state.communityFeed.length)state.communityStatus="offline";
+    }
+    if(epoch===state.sessionEpoch)renderCommunityFeed();
+  })().finally(()=>{if(communityRequest===task)communityRequest=null;});
+  communityRequest=task;
+  return task;
 }
-function renderLocal() {
+let pendingLibraryFrame=0;
+// Search/pagination must not rebuild the entire page or 30k-item learning topics.
+function scheduleLibraryRender(){
+  if(pendingLibraryFrame)return;
+  pendingLibraryFrame=requestAnimationFrame(()=>{
+    pendingLibraryFrame=0;
+    renderLibraryList();
+  });
+}
+function renderLibraryList(){
+  const q=$("library-search").value.trim().toLowerCase();
+  const filterTag=$("library-tag").value;
+  const filtered=state.items.filter(i=>
+    (!filterTag||(i.tags||[]).includes(filterTag))&&
+    (!state.feedTag||(i.tags||[]).includes(state.feedTag))&&
+    (!q||[i.title,i.bvid,i.author,...(i.tags||[])].join(" ").toLowerCase().includes(q)));
+  const pages=Math.max(1,Math.ceil(filtered.length/24));
+  state.page=Math.max(1,Math.min(state.page,pages));
+  $("library-list").innerHTML=filtered.length?
+    filtered.slice((state.page-1)*24,state.page*24).map(i=>cardHtml(i,"library")).join(""):
+    empty("没有找到符合条件的视频","换个搜索词、清除标签，或添加新视频。");
+  $("library-page-label").textContent="第 "+state.page+" / "+pages+" 页 · "+filtered.length+" 条";
+  $("page-prev").disabled=state.page===1;
+  $("page-next").disabled=state.page>=pages;
+}
+function renderLocal(){
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
   $("stat-topics").textContent=new Set(state.items.flatMap(i=>i.tags||[])).size.toLocaleString("zh-CN");
   $("stat-shared").textContent=state.user?.showcase?.length||0;
@@ -344,21 +384,10 @@ function renderLocal() {
   const chosen=tagSelect.value;
   tagSelect.replaceChildren(new Option("全部标签",""),...tags.map(t=>new Option(t,t)));
   tagSelect.value=tags.includes(chosen)?chosen:"";
-  const q=$("library-search").value.trim().toLowerCase();
-  const filtered=state.items.filter(i=>(!tagSelect.value||(i.tags||[]).includes(tagSelect.value))&&
-    (!state.feedTag||(i.tags||[]).includes(state.feedTag))&&
-    (!q||[i.title,i.bvid,i.author,...(i.tags||[])].join(" ").toLowerCase().includes(q)));
-  const pages=Math.max(1,Math.ceil(filtered.length/24));
-  state.page=Math.min(state.page,pages);
-  $("library-list").innerHTML=filtered.length?filtered.slice((state.page-1)*24,state.page*24).map(i=>cardHtml(i,"library")).join("")
-    :empty("还没有符合条件的收藏","手动添加 BV 号，或导入已有 BFC JSON 备份。");
-  $("library-page-label").textContent="第 "+state.page+" / "+pages+" 页 · "+filtered.length+" 条";
-  $("page-prev").disabled=state.page===1;
-  $("page-next").disabled=state.page>=pages;
+  renderLibraryList();
   renderShowcase();
-  renderLearning();
+  if(state.tab==="learning")renderLearning();
   renderFeed();
-  renderCommunityFeed();
 }
 function renderShowcase() {
   const items=state.showcase;
@@ -369,39 +398,58 @@ function renderShowcase() {
     :empty("公开橱窗还没有草稿","在「我的收藏」里选择你愿意公开的视频。");
 }
 
-function renderLearning() {
+function renderLearning(){
   const videos=new Map(state.items.map(item=>[item.bvid,item]));
   const savedTopics=state.topics.filter(t=>t && typeof t.name==="string" && Array.isArray(t.items));
-  const topics=savedTopics.length?savedTopics:
-    [...new Set(state.items.flatMap(item=>item.tags||[]))].slice(0,24).map(tag=>({
-      name:tag, items:state.items.filter(item=>(item.tags||[]).includes(tag)).map(item=>item.bvid)
-    }));
+  let topics=savedTopics;
+  if(!topics.length){
+    // One pass instead of filtering all 30k videos once for every category.
+    const groups=new Map();
+    for(const item of state.items){
+      for(const tag of item.tags||[]){
+        if(!groups.has(tag)){
+          if(groups.size>=24)continue;
+          groups.set(tag,[]);
+        }
+        groups.get(tag).push(item.bvid);
+      }
+    }
+    topics=[...groups].map(([name,items])=>({name,items}));
+  }
   const el=$("learning-list");
-  if(!topics.length){el.innerHTML=empty("还没有学习专题","可以导入 BFC 备份，或先为私人收藏添加标签。");return;}
+  if(!topics.length){
+    el.innerHTML=empty("还没有学习专题","导入私人片单或给视频添加标签即可开始。");
+    return;
+  }
   el.innerHTML=topics.slice(0,36).map((topic,index)=>{
-    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))].map(id=>videos.get(id)).filter(Boolean);
+    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))]
+      .map(id=>videos.get(id)).filter(Boolean);
     const done=selected.filter(x=>x.watched).length;
     const percentage=selected.length?Math.round(done/selected.length*100):0;
-    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">LEARNING TRACK '+(index+1)+'</span><h4>'+
+    const visible=Math.min(selected.length,state.topicVisible[index]||12);
+    const rows=selected.slice(0,visible).map(v=>
+      '<div class="topic-video">'+
+      '<button type="button" data-action="watched" data-id="'+v.bvid+
+      '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+
+      (v.watched?"✓ 已学":"○ 待学")+'</button>'+
+      '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid]||"未分章节")+'</small>'+
+      '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+
+      '</a></div></div>').join("");
+    const more=visible<selected.length?
+      '<button type="button" class="button button-soft topic-more" data-action="topic-more" data-index="'+index+
+      '">再显示 '+Math.min(24,selected.length-visible)+' 条 · 剩余 '+(selected.length-visible)+' 条</button>':"";
+    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">学习专题</span><h4>'+
       escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
-      '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
+      '<p>'+escapeHtml(topic.description||"")+'</p>'+
       '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
       (selected.length?'<div class="topic-videos">'+
         (topic.notes?'<p class="small-copy">专题笔记：'+escapeHtml(topic.notes.slice(0,240))+'</p>':"")+
         (Array.isArray(topic.chapters)&&topic.chapters.length?'<p class="small-copy">章节：'+topic.chapters.map(escapeHtml).join(" · ")+'</p>':"")+
-        selected.slice(0,12).map(v=>'<div class="topic-video">'+
-        '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
-        '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid] || "未分章节")+'</small>'+
-        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div></div>').join("")+
-        (selected.length>12?'<details class="topic-overflow"><summary>展开剩余 '+(selected.length-12)+' 条视频</summary>'+
-        selected.slice(12).map(v=>'<div class="topic-video"><button data-action="watched" data-id="'+v.bvid+
-          '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+
-          '</button><a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
-        '</details>':"")+'</div>':
-        '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
+        rows+more+'</div>':
+        '<p>本机暂无这个专题的视频，可重新导入完整 BFC 备份。</p>')+
+      '</article>';
   }).join("");
 }
-
 
 function renderStudyPlans() {
   const target=$("study-plans");
@@ -429,12 +477,21 @@ function renderStudyPlans() {
   }).join("");
 }
 async function refreshStudyPlans(){
-  if(!state.user){state.studyPlans=[];renderStudyPlans();return;}
+  if(!state.user){state.studyPlans=[];state.studySnapshot="";renderStudyPlans();return;}
   const epoch=state.sessionEpoch,owner=state.user.id;
-  try{const plans=(await api("/study/plans")).plans;
-    if(epoch===state.sessionEpoch && state.user?.id===owner)state.studyPlans=plans;
-  }catch(error){state.studyPlans=[];notify(error.message,true);}
-  renderStudyPlans();
+  try{
+    const plans=(await api("/study/plans")).plans;
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    const snapshot=JSON.stringify(plans);
+    if(snapshot!==state.studySnapshot){
+      state.studyPlans=plans;
+      state.studySnapshot=snapshot;
+      renderStudyPlans();
+    }
+  }catch{
+    // Transient offline states must not erase an existing study plan mid-session.
+    if(!state.studySnapshot)renderStudyPlans();
+  }
 }
 
 function renderAuth() {
@@ -566,7 +623,8 @@ function clearSocialSession(){
   state.user=null;state.people=[];state.connections=[];state.blocked=[];
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
-  state.communityFeed=[];state.communityStatus="loading";
+  state.communityFeed=[];state.communityStatus="loading";state.communityLoadedAt=0;
+  state.connectionsSnapshot="";state.studySnapshot="";
   if($("community-list"))renderCommunityFeed();
   state.messageCursor=null;
   if($("unread-count"))$("unread-count").hidden=true;
@@ -577,16 +635,21 @@ function clearSocialSession(){
   if($("friends-list"))renderConnections();
   if($("study-plans"))renderStudyPlans();
 }
-function renderChat() {
+function renderChat(scrollMode="auto"){
   $("chat-panel").hidden=!state.chatPeer;
   if(!state.chatPeer)return;
+  const list=$("chat-list");
+  const prevHeight=list.scrollHeight,prevTop=list.scrollTop;
+  const nearBottom=prevHeight-prevTop-list.clientHeight<70;
   $("chat-heading").textContent="与 "+state.chatPeer.name+" 的对话";
-  $("chat-list").innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
+  list.innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
     '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join(""):
-    '<div class="chat-welcome">✦ 还没有消息。聊聊最近看到的好视频吧，第一句话由你决定。</div>';
+    '<div class="chat-welcome">还没有消息，聊聊最近看到的好视频吧。</div>';
   $("load-older").hidden=!state.messageCursor;
-  $("chat-list").scrollTop=$("chat-list").scrollHeight;
+  if(scrollMode==="prepend")list.scrollTop=prevTop+list.scrollHeight-prevHeight;
+  else if(scrollMode==="bottom"||(scrollMode==="auto"&&nearBottom))list.scrollTop=list.scrollHeight;
+  else list.scrollTop=prevTop;
 }
 
 async function refreshNotifications(){
@@ -608,7 +671,7 @@ async function openChat(peer){
   if(owner!==state.user?.id||epoch!==state.sessionEpoch)return;
   state.chatMessages=result.messages;
   state.messageCursor=result.nextCursor||null;
-  renderChat();
+  renderChat("bottom");
   await api("/messages/read","POST",{peerId:peer.id});
   await refreshNotifications();
 }
@@ -620,17 +683,27 @@ async function refreshPeople() {
   }catch(e){state.people=[];notify(e.message,true);}
   renderPeople();
 }
-async function refreshConnections() {
-  if(!state.user){state.connections=[];state.blocked=[];renderConnections();return;}
+async function refreshConnections(){
+  if(!state.user){
+    state.connections=[];state.blocked=[];state.connectionsSnapshot="";
+    renderConnections();
+    return;
+  }
   const epoch=state.sessionEpoch,owner=state.user.id;
-  try {
+  try{
     const response=await api("/connections");
-    if(epoch===state.sessionEpoch&&state.user?.id===owner){
+    if(epoch!==state.sessionEpoch||state.user?.id!==owner)return;
+    const snapshot=JSON.stringify([response.connections,response.blocked||[]]);
+    if(snapshot!==state.connectionsSnapshot){
       state.connections=response.connections;
       state.blocked=response.blocked||[];
+      state.connectionsSnapshot=snapshot;
+      renderConnections();
     }
-  }catch(e){state.connections=[];state.blocked=[];notify(e.message,true);}
-  renderConnections();
+  }catch{
+    // Don't blank an inbox whenever a background poll briefly fails.
+    if(!state.connectionsSnapshot)renderConnections();
+  }
 }
 async function updateShowcaseDraft(bvid) {
   const pos=state.showcase.findIndex(x=>x.bvid===bvid);
@@ -704,6 +777,13 @@ async function actionHandler(event) {
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
+    if(action==="topic-more"){
+      const index=Number(button.dataset.index);
+      if(!Number.isInteger(index)||index<0||index>=36)return;
+      state.topicVisible[index]=Math.min(30000,(state.topicVisible[index]||12)+24);
+      renderLearning();
+      return;
+    }
     if(action==="toggle")return await updateShowcaseDraft(id);
     if(action==="watched"){
       const item=state.items.find(x=>x.bvid===id);
@@ -796,18 +876,19 @@ async function actionHandler(event) {
 function wire() {
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("login-shortcut").onclick=()=>setTab("account");
-  for(const id of ["discover-from-hero","feed-meet-cta","feed-connection-cta"]){
+  for(const id of ["discover-from-hero"]){
     $(id).onclick=()=>setTab("discover");
   }
   $("meet-profile-cta").onclick=()=>setTab("account");
   $("share-next-profile").onclick=()=>setTab("account");
-  $("refresh-community").onclick=refreshCommunityFeed;
+  $("refresh-community").onclick=()=>refreshCommunityFeed(true);
   $("feed-channels").addEventListener("click",event=>{
     const button=event.target.closest("button[data-feed-tag]");
     if(!button)return;
     state.feedTag=button.dataset.feedTag;
     state.page=1;
-    renderLocal();
+    renderFeed();
+    scheduleLibraryRender();
   });
   document.querySelectorAll("button[data-chat-prompt]").forEach(button=>{
     button.onclick=()=>{
@@ -849,10 +930,10 @@ function wire() {
     try{const file=e.target.files[0];if(file)await importFile(file);}catch(err){notify(err.message,true);}
     e.target.value="";
   };
-  $("library-search").oninput=()=>{state.page=1;renderLocal();};
-  $("library-tag").onchange=()=>{state.page=1;renderLocal();};
-  $("page-prev").onclick=()=>{state.page--;renderLocal();};
-  $("page-next").onclick=()=>{state.page++;renderLocal();};
+  $("library-search").oninput=()=>{state.page=1;scheduleLibraryRender();};
+  $("library-tag").onchange=()=>{state.page=1;renderLibraryList();};
+  $("page-prev").onclick=()=>{state.page=Math.max(1,state.page-1);renderLibraryList();};
+  $("page-next").onclick=()=>{state.page++;renderLibraryList();};
   $("add-trigger").onclick=()=>{$("add-form").reset();$("add-dialog").showModal();};
   $("cancel-add").onclick=()=>$("add-dialog").close();
   $("add-form").onsubmit=async e=>{
@@ -1016,7 +1097,7 @@ function wire() {
       const seen=new Set(state.chatMessages.map(m=>m.id));
       state.chatMessages=[...result.messages.filter(m=>!seen.has(m.id)),...state.chatMessages];
       state.messageCursor=result.nextCursor||null;
-      renderChat();
+      renderChat("prepend");
     }catch(error){notify(error.message,true);}
   };
   $("close-chat").onclick=()=>{state.chatPeer=null;state.chatMessages=[];state.messageCursor=null;renderChat();};
@@ -1051,8 +1132,11 @@ async function init() {
         try{
           const response=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id));
           const seen=new Set(state.chatMessages.map(m=>m.id));
-          state.chatMessages=[...state.chatMessages,...response.messages.filter(m=>!seen.has(m.id))];
-          renderChat();
+          const incoming=response.messages.filter(m=>!seen.has(m.id));
+          if(incoming.length){
+            state.chatMessages=[...state.chatMessages,...incoming];
+            renderChat();
+          }
         }
         catch{/* Friendship may have been revoked: next user action displays the error. */}
       }

@@ -1,4 +1,4 @@
-const CACHE="tongpin-static-v2";
+const CACHE="tongpin-static-v3";
 const ASSETS=["/tongpin/","/tongpin/app.js","/tongpin/app.css","/tongpin/core.js","/tongpin/icon.svg","/tongpin/manifest.webmanifest"];
 self.addEventListener("install",event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener("activate",event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(x=>x!==CACHE).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));
