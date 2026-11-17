@@ -59,6 +59,10 @@
       <div class="section-heading"><div><span class="overline">YOUR LEARNING TRACKS</span><h3>我的学习专题</h3><p>沿用导入的 BFC 专题，或按本地标签生成学习列表。完成状态仅由你手动标记，不代表 B站播放记录。</p></div></div>
       <div class="privacy-tip">学习进度和私人笔记仅保存在当前浏览器；更换设备前请导出 JSON 备份。</div>
       <div id="learning-list" class="learning-grid"></div>
+      <div class="section-heading"><div><span class="overline">TOGETHER, WITH CONSENT</span><h3>结伴学习</h3>
+        <p>从「好友与消息」向好友发起共学邀请，双方同意后追踪 1–5 个共同目标；不会公开你个人的完整收藏或私人笔记。</p>
+      </div></div>
+      <div id="study-plans" class="learning-grid"></div>
     </section>
     <section class="panel-section" id="tab-showcase" hidden>
       <div class="section-heading"><div><span class="overline">PICKED BY YOU</span><h3>我的收藏橱窗</h3><p>只发布你主动选择的最多 20 个视频；仅上传视频标题、BV号、公开标签和介绍，不上传私人笔记。</p></div><div class="showcase-actions"><button class="button button-soft" id="unpublish-showcase">撤下全部公开收藏</button><button class="button button-primary" id="publish-showcase">确认发布橱窗</button></div></div>
@@ -113,6 +117,13 @@
 </div>
 <input id="import-file" type="file" accept="application/json,.json" hidden>
 <dialog id="add-dialog" class="modal"><form id="add-form" class="stacked-form"><h3>添加私人视频</h3><label>BV号或 B站视频链接<input name="bvid" required placeholder="BVxxxxxxxxxx"></label><label>标题<input name="title" maxlength="150" required></label><label>标签（逗号分隔）<input name="tags" placeholder="AI, 教程"></label><label>私人笔记<textarea name="notes" rows="4" maxlength="4000"></textarea></label><div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-add">取消</button><button class="button button-primary">保存到本地</button></div></form></dialog>
+<dialog id="study-dialog" class="modal"><form id="study-form" class="stacked-form">
+  <h3 id="study-dialog-title">邀请好友一起学习</h3>
+  <p class="small-copy">只有双方同意，才能共享你在这里填写的学习主题和进度；不上传个人收藏清单。</p>
+  <label>共同学习主题<input name="topic" maxlength="80" required placeholder="例如：用 AI 做一部短片"></label>
+  <label>共同目标（每行一个，最多 5 个）<textarea name="goals" rows="5" required placeholder="确定短片主题&#10;写出分镜脚本&#10;制作并分享成品"></textarea></label>
+  <div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-study">取消</button><button class="button button-primary">发送共学邀请</button></div>
+</form></dialog>
 <dialog id="report-dialog" class="modal"><form id="report-form" class="stacked-form">
   <h3>举报不当行为</h3>
   <p class="small-copy">请选择最符合的问题。举报记录将进入人工审核队列，无法保证即时处理。</p>

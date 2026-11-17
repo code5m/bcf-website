@@ -35,7 +35,8 @@ function notify(text, isError = false) {
 }
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
-  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null
+  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null,
+  studyTarget:null,studyPlans:[]
 };
 let db;
 function openLocal() {
@@ -121,7 +122,7 @@ function setTab(tab) {
   $("page-title").textContent=({
     library:"我的收藏",learning:"学习专题",showcase:"收藏橱窗",discover:"发现同频",friends:"好友与消息",account:"账户设置"
   })[tab];
-  if(tab==="learning")renderLearning();
+  if(tab==="learning"){renderLearning();refreshStudyPlans();}
   if(tab==="discover")refreshPeople();
   if(tab==="friends")refreshConnections();
   if(tab==="showcase")renderShowcase();
@@ -204,6 +205,38 @@ function renderLearning() {
   }).join("");
 }
 
+
+function renderStudyPlans() {
+  const target=$("study-plans");
+  if(!state.user){target.innerHTML=empty("注册后才能结伴学习","你的私人学习专题可以继续离线使用。");return;}
+  if(!state.studyPlans.length){target.innerHTML=empty("还没有共学计划","到「好友与消息」里向已同意交友的朋友发起一个学习邀请。");return;}
+  target.innerHTML=state.studyPlans.map(plan=>{
+    const total=plan.goals.length,mine=plan.mine.length,theirs=plan.theirs.length;
+    const avatar=escapeHtml(plan.peer?.displayName || "好友");
+    const goals=plan.goals.map((goal,index)=>{
+      const complete=plan.mine.includes(index),partner=plan.theirs.includes(index);
+      return '<div class="study-goal"><button data-action="study-toggle" data-id="'+plan.id+
+        '" data-index="'+index+'" aria-pressed="'+Boolean(complete)+'"'+
+        (plan.status!=="active"?" disabled":"")+'>'+(complete?"✓ 我已完成":"○ 标记完成")+'</button><span>'+
+        escapeHtml(goal)+'</span><small>'+(partner?"对方已完成":"对方尚未完成")+'</small></div>';
+    }).join("");
+    return '<article class="topic-card study-card"><div class="topic-heading"><div><span class="overline">'+
+      (plan.status==="active"?"共同进行中":plan.incoming?"等你同意":"等待好友同意")+
+      '</span><h4>'+escapeHtml(plan.topic)+'</h4></div><span class="progress-number">'+mine+'/'+total+'</span></div>'+
+      '<p>与 '+avatar+' 一起学习 · 你完成 '+mine+' 项，对方完成 '+theirs+' 项</p>'+
+      '<div class="progress-track"><span style="width:'+(total?Math.round(mine/total*100):0)+'%"></span></div>'+
+      '<div class="study-goals">'+goals+'</div><div class="card-actions">'+
+      (plan.incoming?'<button class="highlight" data-action="study-accept" data-id="'+plan.id+'">同意共学</button>'+
+        '<button data-action="study-decline" data-id="'+plan.id+'">拒绝</button>':"")+
+      '<button data-action="study-cancel" data-id="'+plan.id+'">结束计划</button></div></article>';
+  }).join("");
+}
+async function refreshStudyPlans(){
+  if(!state.user){state.studyPlans=[];renderStudyPlans();return;}
+  try{state.studyPlans=(await api("/study/plans")).plans;}catch(error){notify(error.message,true);}
+  renderStudyPlans();
+}
+
 function renderAuth() {
   const logged=Boolean(state.user);
   $("session-label").textContent=logged?"@"+state.user.handle:"离线私人模式";
@@ -255,7 +288,9 @@ function renderConnections() {
       escapeHtml(c.peer.displayName)+'</h4><p>@'+escapeHtml(c.peer.handle)+'</p></div></div>'+
       '<p>'+ (c.status==="accepted"?"已成为好友":c.direction==="incoming"?"对方向你发来交友申请":"等待对方接受申请")+'</p><div class="card-actions">'+
       (c.status==="pending"&&c.direction==="incoming"?'<button class="highlight" data-action="accept" data-id="'+c.id+'">同意</button><button data-action="decline" data-id="'+c.id+'">拒绝</button>':"")+
-      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button><button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
+      (c.status==="accepted"?'<button class="highlight" data-action="chat" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">聊天</button>'+
+      '<button data-action="study" data-id="'+c.peer.id+'" data-name="'+escapeHtml(c.peer.displayName)+'">结伴学习</button>'+
+      '<button data-action="unfriend" data-id="'+c.id+'">解除好友</button>':"")+
       '<button data-action="block" data-id="'+c.peer.id+'">拉黑</button><button data-action="report" data-id="'+c.peer.id+'">举报</button></div></article>').join("")
     :empty("还没有好友","前往「发现同频」，找到共同收藏的伙伴。");
   $("blocked-list").innerHTML=state.blocked.length?state.blocked.map(x=>'<p>@'+escapeHtml(x.handle)+' <button class="button button-soft" data-action="unblock" data-id="'+x.id+'">解除拉黑</button></p>').join(""):"暂无";
@@ -393,7 +428,20 @@ async function actionHandler(event) {
       return;
     }
     if(!state.user){setTab("account");notify("请先创建账户或登录才能交友。");return;}
-    if(action==="request"){
+    if(action==="study"){
+      state.studyTarget={id,name:button.dataset.name};
+      $("study-form").reset();
+      $("study-dialog-title").textContent="邀请 "+state.studyTarget.name+" 一起学习";
+      $("study-dialog").showModal();
+    }else if(action==="study-accept" || action==="study-decline" || action==="study-cancel" ||
+      action==="study-toggle"){
+      if(action==="study-cancel" && !confirm("确认结束这个共学计划吗？"))return;
+      const decision=action==="study-toggle"?"toggle":action.replace("study-","");
+      await api("/study/plans/"+id,"PUT",{action:decision,
+        ...(decision==="toggle"?{goalIndex:Number(button.dataset.index)}:{})});
+      await refreshStudyPlans();
+      notify(decision==="toggle"?"已更新你的共学进度。":"共学计划状态已更新。");
+    }else if(action==="request"){
       await api("/connections","POST",{targetId:id});notify("已发送交友申请。");await refreshPeople();
     }else if(action==="accept"||action==="decline"){
       await api("/connections/"+id,"PUT",{action});notify("已处理申请。");await refreshConnections();
@@ -537,6 +585,21 @@ function wire() {
     try {await api("/account","DELETE",{password});state.user=null;state.chatPeer=null;renderAuth();renderLocal();setTab("library");notify("社交账户已删除。私人收藏仍在本浏览器。");}
     catch(e){notify(e.message,true);}
   };
+  $("cancel-study").onclick=()=>{$("study-dialog").close();state.studyTarget=null;};
+  $("study-form").onsubmit=async event=>{
+    event.preventDefault();
+    if(!state.studyTarget)return;
+    const data=new FormData(event.currentTarget);
+    const goals=String(data.get("goals")||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    if(goals.length<1||goals.length>5){notify("请填写 1–5 个明确的共同学习目标。",true);return;}
+    try{
+      await api("/study/plans","POST",{peerId:state.studyTarget.id,
+        topic:data.get("topic"),goals});
+      $("study-dialog").close();state.studyTarget=null;
+      notify("共学邀请已发送，对方同意后才会开始共享进度。");
+      setTab("learning");
+    }catch(error){notify(error.message,true);}
+  };
   $("cancel-report").onclick=()=>{$("report-dialog").close();state.reportTarget=null;};
   $("report-form").onsubmit=async event=>{
     event.preventDefault();
@@ -572,6 +635,7 @@ async function init() {
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
     if(!state.user || document.visibilityState!=="visible")return;
+    if(state.tab==="learning")await refreshStudyPlans();
     if(state.tab==="friends"){
       await refreshConnections();
       if(state.chatPeer){
