@@ -1,5 +1,5 @@
 import {DatabaseSync, backup} from "node:sqlite";
-import {mkdir,rename,chmod,stat,unlink} from "node:fs/promises";
+import {mkdir,link,chmod,stat,unlink} from "node:fs/promises";
 import {dirname,resolve} from "node:path";
 import {randomUUID} from "node:crypto";
 // Use SQLite's online backup API; copying an active WAL database file alone is unsafe.
@@ -19,6 +19,8 @@ try{
  try{if(check.prepare("PRAGMA integrity_check").get().integrity_check!=="ok")throw Error("backup_corrupt");}
  finally{check.close();}
  await chmod(temp,0o600);
- await rename(temp,to);
+ // link() creates the final name atomically and fails with EEXIST even if another process wins.
+ await link(temp,to);
+ await unlink(temp);
  console.log(JSON.stringify({ok:true,backup:to}));
 }finally{db.close();await unlink(temp).catch(()=>{});}
