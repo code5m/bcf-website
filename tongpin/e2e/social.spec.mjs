@@ -49,6 +49,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await publish(b);
     await b.locator("[data-tab=library]").click();
     await expect(b.locator("#community-list .community-card")).toHaveCount(1);
+    await expect(b.locator("#community-list [data-action=request]")).toBeVisible();
     await expect(b.locator("#community-list")).toContainText("AI 电影制作入门");
     await expect(b.locator("#community-list")).not.toContainText("Alice的内容");
     await a.locator("[data-tab=discover]").click();
@@ -89,6 +90,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await b.locator("[data-tab=learning]").click();
     await expect(b.locator("#study-plans")).toContainText("对方完成 1 项");
     await b.locator("[data-tab=friends]").click();
+    await b.locator("#friends-list .safety-options summary").click();
     await b.locator("#friends-list [data-action=block]").click();
     await expect(b.locator("#friends-list")).not.toContainText("Alice");
     await a.locator("[data-tab=friends]").click();
