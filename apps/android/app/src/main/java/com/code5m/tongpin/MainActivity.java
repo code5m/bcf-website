@@ -20,6 +20,8 @@ import android.widget.Toast;
 import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Set;
+import java.util.HashSet;
 import java.io.OutputStream;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -100,41 +102,53 @@ public final class MainActivity extends Activity {
         root.addView(webView, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
-        // The bridge exists only for our packaged asset origin, never for remote servers.
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            WebViewCompat.addWebMessageListener(
-                webView, "TongpinNative",
-                Collections.singleton("https://appassets.androidplatform.net"),
-                (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
-                    if (!isMainFrame || !"https://appassets.androidplatform.net".equals(sourceOrigin.toString())) return;
-                    try {
-                        JSONObject payload = new JSONObject(message.getData());
-                        if (!"export".equals(payload.optString("type"))) return;
-                        String content = payload.optString("content", "");
-                        if (content.length() > 30_000_000 || !content.startsWith("{")) {
-                            throw new IllegalArgumentException("backup_invalid_or_too_large");
-                        }
-                        backupToSave = content.getBytes(StandardCharsets.UTF_8);
-                        runOnUiThread(() -> {
-                            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                            intent.setType("application/json");
-                            intent.addCategory(Intent.CATEGORY_OPENABLE);
-                            intent.putExtra(Intent.EXTRA_TITLE, "tongpin-private-backup.json");
-                            startActivityForResult(intent, SAVE_JSON);
-                        });
-                    } catch (Exception ignored) {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                            "本地备份导出失败，请检查备份大小", Toast.LENGTH_LONG).show());
-                    }
-                });
-        }
         String origin = getPreferences(MODE_PRIVATE).getString("server", "");
+        if (!origin.isEmpty()) remoteOrigin = origin;
+        configureNativeExportBridge();
         if (!origin.isEmpty()) {
-            remoteOrigin = origin;
             webView.loadUrl(origin + "/tongpin/");
         } else {
             webView.loadUrl(OFFLINE);
         }
+    }
+
+
+    // Dynamic origin allow-list: no wildcard and no access to arbitrary third-party pages.
+    // A remote origin is included only after the user explicitly selects that HTTPS server.
+    private void configureNativeExportBridge() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        WebViewCompat.removeWebMessageListener(webView, "TongpinNative");
+        final Set<String> allowed = new HashSet<>();
+        allowed.add("https://appassets.androidplatform.net");
+        if (remoteOrigin != null && remoteOrigin.startsWith("https://")) allowed.add(remoteOrigin);
+        WebViewCompat.addWebMessageListener(webView, "TongpinNative", allowed,
+            (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+                String from = sourceOrigin.getScheme() + "://" + sourceOrigin.getAuthority();
+                if (!isMainFrame || !allowed.contains(from)) return;
+                try {
+                    JSONObject payload = new JSONObject(message.getData());
+                    if (!"export".equals(payload.optString("type"))) return;
+                    String content = payload.optString("content", "");
+                    byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+                    if (bytes.length > 20_000_000 || bytes.length == 0)
+                        throw new IllegalArgumentException("backup_invalid_or_too_large");
+                    JSONObject archive = new JSONObject(content);
+                    if (!"tongpin_private_library".equals(archive.optString("type"))
+                        || !archive.has("videos"))
+                        throw new IllegalArgumentException("invalid_archive");
+                    runOnUiThread(() -> {
+                        backupToSave = bytes;
+                        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        intent.setType("application/json");
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.putExtra(Intent.EXTRA_TITLE, "tongpin-private-backup.json");
+                        startActivityForResult(intent, SAVE_JSON);
+                    });
+                } catch (Exception ignored) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "私人备份导出失败：请检查备份格式和大小", Toast.LENGTH_LONG).show());
+                }
+            });
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -173,6 +187,7 @@ public final class MainActivity extends Activity {
     private void openOffline() {
         remoteOrigin = null;
         getPreferences(MODE_PRIVATE).edit().remove("server").apply();
+        configureNativeExportBridge();
         webView.loadUrl(OFFLINE);
     }
     private void connectServer() {
@@ -194,6 +209,7 @@ public final class MainActivity extends Activity {
                         }
                         remoteOrigin = "https://" + uri.getAuthority();
                         getPreferences(MODE_PRIVATE).edit().putString("server", remoteOrigin).apply();
+                        configureNativeExportBridge();
                         webView.loadUrl(remoteOrigin + "/tongpin/");
                     } catch (Exception e) {
                         Toast.makeText(this, "请输入有效 HTTPS 域名", Toast.LENGTH_LONG).show();
