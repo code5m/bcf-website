@@ -35,7 +35,7 @@ function notify(text, isError = false) {
 }
 const state = {
   items: [], showcase: [], user: null, people: [], connections: [], blocked: [],
-  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false
+  chatPeer: null, chatMessages: [], topics: [], tab: "library", page: 1, authMode: "register", localReady:false, reportTarget:null
 };
 let db;
 function openLocal() {
@@ -411,11 +411,9 @@ async function actionHandler(event) {
     }else if(action==="unblock"){
       await api("/blocks/"+id,"DELETE",{});notify("已解除拉黑。");await refreshConnections();
     }else if(action==="report"){
-      const reason=prompt("请选择举报原因：harassment（骚扰） / spam（垃圾信息） / privacy（隐私） / other（其他）","spam");
-      if(reason===null)return;
-      const details=prompt("补充说明（选填，最多 300 字）","")||"";
-      await api("/reports","POST",{targetId:id,reason,details});
-      notify("举报已记录，等待人工审核；当前版本不提供自动处理承诺。");
+      state.reportTarget=id;
+      $("report-form").reset();
+      $("report-dialog").showModal();
     }
   }catch(e){notify(e.message,true);}
 }
@@ -538,6 +536,18 @@ function wire() {
     if(password===null)return;
     try {await api("/account","DELETE",{password});state.user=null;state.chatPeer=null;renderAuth();renderLocal();setTab("library");notify("社交账户已删除。私人收藏仍在本浏览器。");}
     catch(e){notify(e.message,true);}
+  };
+  $("cancel-report").onclick=()=>{$("report-dialog").close();state.reportTarget=null;};
+  $("report-form").onsubmit=async event=>{
+    event.preventDefault();
+    if(!state.reportTarget)return;
+    const fields=new FormData(event.currentTarget);
+    try{
+      await api("/reports","POST",{targetId:state.reportTarget,
+        reason:fields.get("reason"),details:fields.get("details")});
+      $("report-dialog").close();state.reportTarget=null;
+      notify("举报已提交审核。你也可以直接拉黑对方。");
+    }catch(e){notify(e.message,true);}
   };
   $("close-chat").onclick=()=>{state.chatPeer=null;renderChat();};
   $("chat-form").onsubmit=async event=>{

@@ -3,6 +3,9 @@ on:
   pull_request:
     paths: ['apps/**','tongpin/**','.github/workflows/mobile-build.yml']
   workflow_dispatch:
+concurrency:
+  group: tongpin-4-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

@@ -82,3 +82,41 @@ test("visitor can use private library without registering and sees no fabricated
   expect(response.status()).toBe(200);
   expect((await response.json()).externalBilibiliRequests).toBe(0);
 });
+
+test("BFC JSON imports topics, restores learning progress, and exports private backup",async({page})=>{
+  await page.goto("/tongpin/");
+  const payload={type:"workbench_backup",state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"电影后期入门",author:"创作者"}},
+    library:{topics:[{id:"film",name:"电影实践",items:["BV1234567890"]}],
+      categories:{"BV1234567890":"电影"},notes:{"BV1234567890":"私人笔记"},
+      watched:{"BV1234567890":false}}
+  }};
+  await page.locator("#import-file").setInputFiles({
+    name:"bfc-private-backup.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(payload))
+  });
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await expect(page.locator("#library-list")).toContainText("私人笔记");
+  await page.locator("[data-tab=learning]").click();
+  await expect(page.locator("#learning-list")).toContainText("电影实践");
+  await page.locator("[data-action=watched]").first().click();
+  await expect(page.locator("#learning-list")).toContainText("1/1");
+  await page.locator("[data-tab=library]").click();
+  const [download]=await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#export-trigger").click()
+  ]);
+  expect(download.suggestedFilename()).toContain("tongpin-private-backup-");
+});
+test("private sharing draft can be reverted without exposing private note",async({page})=>{
+  await page.goto("/tongpin/");
+  await page.locator("#add-trigger").click();
+  await page.locator('#add-form [name="bvid"]').fill("BV1234567890");
+  await page.locator('#add-form [name="title"]').fill("个人私密收藏");
+  await page.locator('#add-form [name="notes"]').fill("这个笔记绝不能公开");
+  await page.locator("#add-form .button-primary").click();
+  await page.locator("#library-list [data-action=toggle]").click();
+  await page.locator("[data-tab=showcase]").click();
+  await expect(page.locator("#showcase-list")).not.toContainText("这个笔记绝不能公开");
+  await page.locator("#showcase-list [data-action=toggle]").click();
+  await expect(page.locator("#showcase-list")).toContainText("公开橱窗还没有草稿");
+});

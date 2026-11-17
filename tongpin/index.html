@@ -113,5 +113,17 @@
 </div>
 <input id="import-file" type="file" accept="application/json,.json" hidden>
 <dialog id="add-dialog" class="modal"><form id="add-form" class="stacked-form"><h3>添加私人视频</h3><label>BV号或 B站视频链接<input name="bvid" required placeholder="BVxxxxxxxxxx"></label><label>标题<input name="title" maxlength="150" required></label><label>标签（逗号分隔）<input name="tags" placeholder="AI, 教程"></label><label>私人笔记<textarea name="notes" rows="4" maxlength="4000"></textarea></label><div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-add">取消</button><button class="button button-primary">保存到本地</button></div></form></dialog>
+<dialog id="report-dialog" class="modal"><form id="report-form" class="stacked-form">
+  <h3>举报不当行为</h3>
+  <p class="small-copy">请选择最符合的问题。举报记录将进入人工审核队列，无法保证即时处理。</p>
+  <label>举报原因<select name="reason" required>
+    <option value="harassment">骚扰或威胁</option>
+    <option value="spam">垃圾广告或营销</option>
+    <option value="privacy">隐私侵害</option>
+    <option value="other">其他问题</option>
+  </select></label>
+  <label>补充说明<textarea name="details" maxlength="300" rows="4" placeholder="请客观描述具体行为（选填）"></textarea></label>
+  <div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-report">取消</button><button class="button button-primary">提交举报</button></div>
+</form></dialog>
 <script type="module" src="/tongpin/app.js"></script>
 </body></html>
