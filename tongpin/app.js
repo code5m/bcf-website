@@ -659,15 +659,16 @@ function renderPeople(){
       '</details></div></article>';
   }).join("");
 }
-let candidateRequest=null;
+let candidateRequest=null,candidateRequestEpoch=-1;
 async function loadCandidatePages({reset=false,pages=3}={}){
-  if(candidateRequest)return candidateRequest;
+  if(candidateRequest && candidateRequestEpoch===state.sessionEpoch)return candidateRequest;
   if(reset){
     state.candidates=[];state.candidateCursor=null;state.candidatesLoaded=false;
     state.candidateChecked=0;state.candidateError=false;
   }
   if(state.candidatesLoaded && !state.candidateCursor)return;
   const epoch=state.sessionEpoch;
+  candidateRequestEpoch=epoch;
   state.candidatesLoading=true;renderPeople();
   const task=(async()=>{
     try{
@@ -1144,16 +1145,23 @@ function wire() {
       body.adult=values.get("adult")==="on";
       body.acceptTerms=body.adult;
     }
+    const destinationAtStart=state.tab;
+    const submit=$("auth-submit");
+    submit.disabled=true;
     try {
       const result=await api(state.authMode==="register"?"/register":"/login","POST",body);
       const pending=state.pendingContact;
+      // Honour a deliberate navigation while an asynchronous login finishes.
+      const destination=pending?"discover":
+        state.tab!==destinationAtStart?state.tab:"account";
       clearSocialSession();state.user=result.user;state.pendingContact=pending;
       renderAuth();renderLocal();
-      setTab(pending?"discover":"account");
+      setTab(destination);
       notify(pending?"已登录，请确认是否发送刚才的认识申请。":
         "账户已登录。私人收藏依然只在本机。");
       form.reset();
     }catch(e){notify(e.message,true);}
+    finally{submit.disabled=false;}
   };
   $("profile-form").onsubmit=async event=>{
     event.preventDefault();

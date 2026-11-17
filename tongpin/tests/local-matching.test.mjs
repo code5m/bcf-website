@@ -62,3 +62,42 @@ test("public candidate discovery never receives or discloses private BV IDs",asy
     assert.deepEqual((await req("/candidates")).data.people,[]);
   }finally{await new Promise(ok=>server.close(ok));await rm(dir,{recursive:true,force:true});}
 });
+
+
+test("message retry with the same client UUID is idempotent and cannot impersonate peers",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tongpin-idempotent-"));
+  const route=createSocialApi({dataDir:dir});
+  const server=createServer((req,res)=>route(req,res,new URL(req.url,"http://"+req.headers.host)));
+  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
+  const base="http://127.0.0.1:"+server.address().port;
+  const call=async(path,method="GET",data,cookie="")=>{
+    const response=await fetch(base+"/api/social"+path,{
+      method,headers:{"Origin":base,"Content-Type":"application/json",
+        "X-Tongpin-Request":"1",...(cookie?{"Cookie":cookie}:{})},
+      body:data===undefined?undefined:JSON.stringify(data)});
+    return {status:response.status,data:await response.json(),cookie:(response.headers.get("set-cookie")||"").split(";")[0]};
+  };
+  try{
+    const a=await call("/register","POST",{handle:"writer",password:"writer-password-123",
+      displayName:"Writer",adult:true,acceptTerms:true});
+    const b=await call("/register","POST",{handle:"reader",password:"reader-password-123",
+      displayName:"Reader",adult:true,acceptTerms:true});
+    await call("/showcase","PUT",{items:[{bvid:"BV1234567890",title:"Public"}]},b.cookie);
+    await call("/me","PUT",{displayName:"Reader",topics:["video"],discoverable:true},b.cookie);
+    const relation=await call("/connections","POST",{targetId:b.data.user.id},a.cookie);
+    assert.equal(relation.status,201);
+    assert.equal((await call("/connections/"+relation.data.id,"PUT",{action:"accept"},b.cookie)).status,200);
+    const id="11111111-1111-4111-8111-111111111111";
+    const payload={peerId:b.data.user.id,text:"Same message",clientMessageId:id};
+    const first=await call("/messages","POST",payload,a.cookie);
+    const retry=await call("/messages","POST",payload,a.cookie);
+    assert.equal(first.status,201);
+    assert.equal(retry.status,201);
+    assert.equal(first.data.message.id,id);
+    assert.equal(retry.data.message.id,id);
+    const thread=await call("/messages?peer="+a.data.user.id,"GET",undefined,b.cookie);
+    assert.equal(thread.data.messages.length,1);
+    const conflict=await call("/messages","POST",{...payload,text:"Injected duplicate"},a.cookie);
+    assert.equal(conflict.status,409);
+  }finally{await new Promise(ok=>server.close(ok));await rm(dir,{recursive:true,force:true});}
+});

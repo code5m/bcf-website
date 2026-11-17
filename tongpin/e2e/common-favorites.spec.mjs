@@ -25,6 +25,7 @@ test("private favorite matches a different user's opt-in public video without up
     await b.locator('#auth-form [name="displayName"]').fill("电影同好");
     await b.locator('#auth-form [name="adult"]').check();
     await b.locator("#auth-submit").click();
+    await expect(b.locator("#session-label")).toContainText("@b_"+unique);
     await b.locator("#shortcut-showcase").click();
     await b.locator("#publish-showcase").click();
     await b.locator('#nav [data-tab=account]').click();
