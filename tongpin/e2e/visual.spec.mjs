@@ -1,5 +1,6 @@
 import {test,expect} from "@playwright/test";
 test("desktop and narrow-mobile layouts preserve navigation and prevent horizontal overflow",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
   await page.setViewportSize({width:1440,height:900});
   await page.goto("/tongpin/");
   const backup={type:"tongpin_private_library",version:2,videos:[
