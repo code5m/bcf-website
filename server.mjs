@@ -29,7 +29,7 @@ const rootAssets=new Set([
   "saved-page-parser.js"
 ]);
 const tongpinAssets=new Set([
-  "index.html","app.js","app.css","core.js","sw.js","manifest.webmanifest","icon.svg",
+  "index.html","app.js","app.css","core.js","demo.js","sw.js","manifest.webmanifest","icon.svg",
   "terms.html","admin.html","admin.js"
 ]);
 const securityHeaders={
