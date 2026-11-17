@@ -1,6 +1,31 @@
 import {bvidOf, cleanTopics, normalizeImported, matchLocalFavorites, MAX_SHOWCASE} from "./core.js";
 
 const $ = id => document.getElementById(id);
+let contestMounted=false,liveAppInitialized=false,contestCleanup=null;
+async function showContestDemo(){
+  if(contestMounted)return;
+  const shell=document.querySelector(".app-shell"),root=$("contest-demo");
+  try{
+    const module=await import("./demo.js");
+    shell.hidden=true;root.hidden=false;contestMounted=true;
+    const url=new URL(location.href);
+    url.searchParams.set("demo","1");
+    history.replaceState(null,"",url.pathname+url.search+url.hash);
+    contestCleanup=module.mountDemo(root,{onExit:()=>{
+      contestCleanup=null;contestMounted=false;
+      root.hidden=true;shell.hidden=false;
+      const back=new URL(location.href);
+      back.searchParams.delete("demo");
+      history.replaceState(null,"",back.pathname+back.search+back.hash);
+      if(!liveAppInitialized)init();
+    }});
+  }catch(error){
+    console.error("[tongpin demo]",error);
+    shell.hidden=false;root.hidden=true;contestMounted=false;
+    if(!liveAppInitialized)await init();
+    else notify("本机交互演示暂不可用，请直接使用真实 APP。",true);
+  }
+}
 const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
 }[c]));
@@ -1052,6 +1077,8 @@ async function actionHandler(event) {
   }catch(e){notify(e.message,true);}
 }
 function wire() {
+  $("contest-demo-top").onclick=showContestDemo;
+  $("contest-demo-hero").onclick=showContestDemo;
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("library-sharing").onclick=()=>setTab("showcase");
   $("shortcut-showcase").onclick=()=>setTab("showcase");
@@ -1330,6 +1357,12 @@ function wire() {
   };
 }
 async function init() {
+  if(new URLSearchParams(location.search).get("demo")==="1"){
+    await showContestDemo();
+    return;
+  }
+  if(liveAppInitialized)return;
+  liveAppInitialized=true;
   wire();
   renderAuthMode();
   try {db=await openLocal();await refreshLocal();}
@@ -1339,7 +1372,7 @@ async function init() {
   await refreshCommunityFeed();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
-    if(!state.user || document.visibilityState!=="visible")return;
+    if(contestMounted || !state.user || document.visibilityState!=="visible")return;
     if(state.tab==="learning")await refreshStudyPlans();
     await refreshNotifications();
     if(state.tab==="friends"){

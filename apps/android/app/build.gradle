@@ -23,7 +23,7 @@ dependencies {
 
 tasks.register('syncTongpinWebAssets', Copy) {
   from rootProject.file('../../tongpin')
-  include 'index.html','app.js','app.css','core.js','terms.html','icon.svg','sw.js','manifest.webmanifest'
+  include 'index.html','app.js','app.css','core.js','demo.js','terms.html','icon.svg','sw.js','manifest.webmanifest'
   into project.file('src/main/assets/tongpin')
 }
 tasks.named('preBuild').configure { dependsOn tasks.named('syncTongpinWebAssets') }
