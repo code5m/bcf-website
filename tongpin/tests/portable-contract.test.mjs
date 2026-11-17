@@ -33,3 +33,33 @@ test("older BFC {percent} progress and a portable numeric value remain distinct"
     videos:[{bvid:"BV1234567890",title:"课程",progress:82}]});
   assert.equal(newer.items[0].progress,82);
 });
+
+
+test("1200-video private round trip preserves notes, source folders, topics and numerical progress",()=>{
+  const items=Array.from({length:1200},(_,i)=>{
+    const bvid="BV"+i.toString(36).padStart(10,"0");
+    return {bvid,title:"影片学习 "+i,author:"贡献者",tags:["视频","AI"],
+      topics:["个人收藏专题"],sourceFolders:["原B站收藏夹-"+i%4],
+      notes:"仅本地私有笔记 #"+i,watched:i%5===0,progress:i%101,metadataMissing:false};
+  });
+  const input={type:"tongpin_private_library",version:3,videos:items};
+  const normalized=normalizeImported(input);
+  assert.equal(normalized.items.length,1200);
+  const restored=normalizeImported(JSON.parse(JSON.stringify({
+    type:"tongpin_private_library",version:3,videos:normalized.items,
+    topics:normalized.topics,showcaseDraft:[]
+  })));
+  const byId=new Map(restored.items.map(x=>[x.bvid,x]));
+  assert.equal(byId.size,1200);
+  for(const original of items){
+    const other=byId.get(original.bvid);
+    assert.ok(other,"missing "+original.bvid);
+    assert.equal(other.title,original.title);
+    assert.equal(other.notes,original.notes);
+    assert.equal(other.progress,original.progress);
+    assert.equal(other.watched,original.watched);
+    assert.deepEqual(other.topics,original.topics);
+    assert.deepEqual(other.sourceFolders,original.sourceFolders);
+    assert.deepEqual(other.tags,original.tags);
+  }
+});
