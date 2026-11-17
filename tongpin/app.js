@@ -386,39 +386,58 @@ function renderShowcase() {
     :empty("公开橱窗还没有草稿","在「我的收藏」里选择你愿意公开的视频。");
 }
 
-function renderLearning() {
+function renderLearning(){
   const videos=new Map(state.items.map(item=>[item.bvid,item]));
   const savedTopics=state.topics.filter(t=>t && typeof t.name==="string" && Array.isArray(t.items));
-  const topics=savedTopics.length?savedTopics:
-    [...new Set(state.items.flatMap(item=>item.tags||[]))].slice(0,24).map(tag=>({
-      name:tag, items:state.items.filter(item=>(item.tags||[]).includes(tag)).map(item=>item.bvid)
-    }));
+  let topics=savedTopics;
+  if(!topics.length){
+    // One pass instead of filtering all 30k videos once for every category.
+    const groups=new Map();
+    for(const item of state.items){
+      for(const tag of item.tags||[]){
+        if(!groups.has(tag)){
+          if(groups.size>=24)continue;
+          groups.set(tag,[]);
+        }
+        groups.get(tag).push(item.bvid);
+      }
+    }
+    topics=[...groups].map(([name,items])=>({name,items}));
+  }
   const el=$("learning-list");
-  if(!topics.length){el.innerHTML=empty("还没有学习专题","可以导入 BFC 备份，或先为私人收藏添加标签。");return;}
+  if(!topics.length){
+    el.innerHTML=empty("还没有学习专题","导入私人片单或给视频添加标签即可开始。");
+    return;
+  }
   el.innerHTML=topics.slice(0,36).map((topic,index)=>{
-    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))].map(id=>videos.get(id)).filter(Boolean);
+    const selected=[...new Set(topic.items.map(x=>bvidOf(x)).filter(Boolean))]
+      .map(id=>videos.get(id)).filter(Boolean);
     const done=selected.filter(x=>x.watched).length;
     const percentage=selected.length?Math.round(done/selected.length*100):0;
-    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">LEARNING TRACK '+(index+1)+'</span><h4>'+
+    const visible=Math.min(selected.length,state.topicVisible[index]||12);
+    const rows=selected.slice(0,visible).map(v=>
+      '<div class="topic-video">'+
+      '<button type="button" data-action="watched" data-id="'+v.bvid+
+      '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+
+      (v.watched?"✓ 已学":"○ 待学")+'</button>'+
+      '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid]||"未分章节")+'</small>'+
+      '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+
+      '</a></div></div>').join("");
+    const more=visible<selected.length?
+      '<button type="button" class="button button-soft topic-more" data-action="topic-more" data-index="'+index+
+      '">再显示 '+Math.min(24,selected.length-visible)+' 条 · 剩余 '+(selected.length-visible)+' 条</button>':"";
+    return '<article class="topic-card"><div class="topic-heading"><div><span class="overline">学习专题</span><h4>'+
       escapeHtml(topic.name)+'</h4></div><span class="progress-number">'+done+'/'+selected.length+'</span></div>'+
-      '<p>'+escapeHtml(topic.description||"将保存的内容变成有序的学习计划。")+'</p>'+
+      '<p>'+escapeHtml(topic.description||"")+'</p>'+
       '<div class="progress-track"><span style="width:'+percentage+'%"></span></div>'+
       (selected.length?'<div class="topic-videos">'+
         (topic.notes?'<p class="small-copy">专题笔记：'+escapeHtml(topic.notes.slice(0,240))+'</p>':"")+
         (Array.isArray(topic.chapters)&&topic.chapters.length?'<p class="small-copy">章节：'+topic.chapters.map(escapeHtml).join(" · ")+'</p>':"")+
-        selected.slice(0,12).map(v=>'<div class="topic-video">'+
-        '<button type="button" data-action="watched" data-id="'+v.bvid+'" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+'</button>'+
-        '<div><small class="topic-chapter">'+escapeHtml((topic.sections||{})[v.bvid] || "未分章节")+'</small>'+
-        '<a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div></div>').join("")+
-        (selected.length>12?'<details class="topic-overflow"><summary>展开剩余 '+(selected.length-12)+' 条视频</summary>'+
-        selected.slice(12).map(v=>'<div class="topic-video"><button data-action="watched" data-id="'+v.bvid+
-          '" class="watched-toggle" aria-pressed="'+Boolean(v.watched)+'">'+(v.watched?"✓ 已学":"○ 待学")+
-          '</button><a href="'+v.url+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(v.title)+'</a></div>').join("")+
-        '</details>':"")+'</div>':
-        '<p>本机尚无此专题的视频元数据，可导入完整 BFC 工作台备份补齐。</p>')+'</article>';
+        rows+more+'</div>':
+        '<p>本机暂无这个专题的视频，可重新导入完整 BFC 备份。</p>')+
+      '</article>';
   }).join("");
 }
-
 
 function renderStudyPlans() {
   const target=$("study-plans");
@@ -583,7 +602,8 @@ function clearSocialSession(){
   state.user=null;state.people=[];state.connections=[];state.blocked=[];
   state.chatPeer=null;state.chatMessages=[];state.studyTarget=null;
   state.studyPlans=[];state.reportTarget=null;state.unread=0;state.appeals=[];
-  state.communityFeed=[];state.communityStatus="loading";
+  state.communityFeed=[];state.communityStatus="loading";state.communityLoadedAt=0;
+  state.connectionsSnapshot="";state.studySnapshot="";
   if($("community-list"))renderCommunityFeed();
   state.messageCursor=null;
   if($("unread-count"))$("unread-count").hidden=true;
@@ -594,16 +614,21 @@ function clearSocialSession(){
   if($("friends-list"))renderConnections();
   if($("study-plans"))renderStudyPlans();
 }
-function renderChat() {
+function renderChat(scrollMode="auto"){
   $("chat-panel").hidden=!state.chatPeer;
   if(!state.chatPeer)return;
+  const list=$("chat-list");
+  const prevHeight=list.scrollHeight,prevTop=list.scrollTop;
+  const nearBottom=prevHeight-prevTop-list.clientHeight<70;
   $("chat-heading").textContent="与 "+state.chatPeer.name+" 的对话";
-  $("chat-list").innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
+  list.innerHTML=state.chatMessages.length?state.chatMessages.map(m=>
     '<div class="chat-item'+(m.from===state.user?.id?" mine":"")+'">'+escapeHtml(m.text)+
     '<small>'+escapeHtml(new Date(m.createdAt).toLocaleString("zh-CN"))+'</small></div>').join(""):
-    '<div class="chat-welcome">✦ 还没有消息。聊聊最近看到的好视频吧，第一句话由你决定。</div>';
+    '<div class="chat-welcome">还没有消息，聊聊最近看到的好视频吧。</div>';
   $("load-older").hidden=!state.messageCursor;
-  $("chat-list").scrollTop=$("chat-list").scrollHeight;
+  if(scrollMode==="prepend")list.scrollTop=prevTop+list.scrollHeight-prevHeight;
+  else if(scrollMode==="bottom"||(scrollMode==="auto"&&nearBottom))list.scrollTop=list.scrollHeight;
+  else list.scrollTop=prevTop;
 }
 
 async function refreshNotifications(){
@@ -625,7 +650,7 @@ async function openChat(peer){
   if(owner!==state.user?.id||epoch!==state.sessionEpoch)return;
   state.chatMessages=result.messages;
   state.messageCursor=result.nextCursor||null;
-  renderChat();
+  renderChat("bottom");
   await api("/messages/read","POST",{peerId:peer.id});
   await refreshNotifications();
 }
@@ -1041,7 +1066,7 @@ function wire() {
       const seen=new Set(state.chatMessages.map(m=>m.id));
       state.chatMessages=[...result.messages.filter(m=>!seen.has(m.id)),...state.chatMessages];
       state.messageCursor=result.nextCursor||null;
-      renderChat();
+      renderChat("prepend");
     }catch(error){notify(error.message,true);}
   };
   $("close-chat").onclick=()=>{state.chatPeer=null;state.chatMessages=[];state.messageCursor=null;renderChat();};
@@ -1076,8 +1101,11 @@ async function init() {
         try{
           const response=await api("/messages?peer="+encodeURIComponent(state.chatPeer.id));
           const seen=new Set(state.chatMessages.map(m=>m.id));
-          state.chatMessages=[...state.chatMessages,...response.messages.filter(m=>!seen.has(m.id))];
-          renderChat();
+          const incoming=response.messages.filter(m=>!seen.has(m.id));
+          if(incoming.length){
+            state.chatMessages=[...state.chatMessages,...incoming];
+            renderChat();
+          }
         }
         catch{/* Friendship may have been revoked: next user action displays the error. */}
       }
