@@ -252,3 +252,19 @@ test("consent-driven study plan only shares explicit goals with a friend, not pr
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+test("BFC topic notes, chapter order and original folder names survive round trip",()=>{
+  const folder="这是一个比较长的原始收藏文件夹名称_电影学习_后期制作_导演资料";
+  const topic="电影制作的高阶工作流与完整个人体系";
+  const data={type:"workbench_backup",state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"收藏视频",originalFolders:[folder]}},
+    library:{topics:[{name:topic,items:["BV1234567890"],notes:"这是专属的专题笔记",
+      chapters:["写作","拍摄","后期"],sections:{"BV1234567890":"拍摄"}}]}
+  }};
+  const result=normalizeImported(data);
+  assert.equal(result.items[0].sourceFolders[0],folder);
+  assert.equal(result.topics[0].name,topic);
+  assert.equal(result.topics[0].notes,"这是专属的专题笔记");
+  assert.deepEqual(result.topics[0].chapters,["写作","拍摄","后期"]);
+  assert.equal(result.topics[0].sections.BV1234567890,"拍摄");
+});

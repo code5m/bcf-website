@@ -93,9 +93,9 @@ export function normalizeImported(payload) {
       bvid, title, metadataMissing: isPlaceholder,
       author: cleanText(pick(row.author, row.owner?.name, row.upper, base.author, ""), 60),
       tags: cleanTopics([...shortList(row.tags), cleanText(pick(categories[bvid], row.category, row.topic, ""), 24), ...topicLabels], 12),
-      topics: cleanTopics(topicLabels, 12),
+      topics: [...new Set(topicLabels.map(x=>cleanText(x,80)).filter(Boolean))].slice(0,12),
       notes: cleanText(note, 4000),
-      sourceFolders: cleanTopics(shortList(originalFolders), 30),
+      sourceFolders: [...new Set(shortList(originalFolders).map(x=>cleanText(x,80)).filter(Boolean))].slice(0,30),
       watched: isWatched, progress: Number.isFinite(Number(oldProgress?.percent)) ?
         Math.max(0, Math.min(100, Number(oldProgress.percent))) : null,
       url: videoUrl(bvid)
@@ -126,10 +126,18 @@ export function normalizeImported(payload) {
     metadataOnly++;
   }
   if (byId.size > MAX_IMPORT) throw new Error("import_limit_30000");
-  const importedTopics = topics.map(t => ({
-    name: cleanText(t?.name, 80), description: cleanText(t?.description, 500),
-    chapters: cleanTopics(t?.chapters, 30), items: shortList(t?.items).map(x => bvidOf(x)).filter(Boolean)
-  })).filter(x => x.name);
+  const importedTopics = topics.map(t => {
+    const sections={};
+    for(const [candidate,label] of Object.entries(dictionary(t?.sections)).slice(0,MAX_IMPORT)){
+      const id=bvidOf(candidate);
+      if(id===candidate) sections[id]=cleanText(label,80);
+    }
+    return {
+      name:cleanText(t?.name,80),description:cleanText(t?.description,500),
+      notes:cleanText(t?.notes,4000),chapters:shortList(t?.chapters).map(x=>cleanText(x,80)).filter(Boolean).slice(0,30),
+      items:shortList(t?.items).map(x=>bvidOf(x)).filter(Boolean).slice(0,MAX_IMPORT),sections
+    };
+  }).filter(x=>x.name);
   return {
     items:[...byId.values()], rejected, duplicates:duplicateCount, metadataOnly,
     kind:payload.type === "tongpin_private_library" ? "tongpin" :
