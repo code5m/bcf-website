@@ -194,3 +194,55 @@ test("switching social accounts does not retain the old account's visible profil
   await page.locator("[data-tab=learning]").click();
   await expect(page.locator("#study-plans")).toContainText("还没有共学计划");
 });
+
+
+test("delete after importing cannot resurrect a private note through import undo",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
+  await page.goto("/tongpin/");
+  const upload=async(payload)=>page.locator("#import-file").setInputFiles({
+    name:"private.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(payload))
+  });
+  await upload({type:"tongpin_private_library",version:3,videos:[
+    {bvid:"BV1234567890",title:"秘密学习视频",notes:"删除后不应恢复的私人笔记",tags:["隐私"]}
+  ]});
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await upload({type:"tongpin_private_library",version:3,videos:[
+    {bvid:"BV0987654321",title:"后来导入的视频",notes:"保留",tags:["技术"]}
+  ]});
+  await expect(page.locator("#stat-count")).toHaveText("2");
+  await page.locator('#library-list [data-action="remove"][data-id="BV1234567890"]').click();
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await page.locator("#undo-import").click();
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await expect(page.locator("#library-list")).not.toContainText("秘密学习视频");
+  await page.reload();
+  await expect(page.locator("#library-list")).not.toContainText("删除后不应恢复的私人笔记");
+});
+
+test("manual correction of placeholder title survives subsequent import",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
+  await page.goto("/tongpin/");
+  const oldBackup={type:"workbench_backup",state:{
+    library:{notes:{"BV1234567890":"原本没有标题的私密笔记"}}
+  }};
+  await page.locator("#import-file").setInputFiles({
+    name:"old-bfc.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(oldBackup))
+  });
+  await expect(page.locator("#library-list")).toContainText("待补齐标题");
+  await page.locator('#library-list [data-action="edit"][data-id="BV1234567890"]').click();
+  await page.locator('#add-form [name="title"]').fill("人工核实的真实标题");
+  await page.locator("#add-form .button-primary").click();
+  const [download]=await Promise.all([page.waitForEvent("download"),page.locator("#export-trigger").click()]);
+  const {readFile}=await import("node:fs/promises");
+  const archive=JSON.parse(await readFile(await download.path(),"utf8"));
+  const item=archive.videos.find(v=>v.bvid==="BV1234567890");
+  expect(item.metadataMissing).toBe(false);
+  expect(item.notes).toBe("原本没有标题的私密笔记");
+  await page.locator("#import-file").setInputFiles({
+    name:"new-bfc.json",mimeType:"application/json",
+    buffer:Buffer.from(JSON.stringify({type:"workbench_backup",state:{
+      videos:{"BV1234567890":{bvid:"BV1234567890",title:"另一个数据源的标题"}}
+    }}))
+  });
+  await expect(page.locator("#library-list")).toContainText("人工核实的真实标题");
+});
