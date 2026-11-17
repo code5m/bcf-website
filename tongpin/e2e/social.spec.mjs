@@ -137,3 +137,60 @@ test("private sharing draft can be reverted without exposing private note",async
   await page.locator("#showcase-list [data-action=toggle]").click();
   await expect(page.locator("#showcase-list")).toContainText("公开橱窗还没有草稿");
 });
+
+
+test("two BFC imports preserve existing topic notes and offer atomic undo",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
+  await page.goto("/tongpin/");
+  const first={type:"workbench_backup",state:{
+    videos:{"BV1234567890":{bvid:"BV1234567890",title:"第一段课程"}},
+    library:{topics:[{name:"电影专题",notes:"我原来的专属学习笔记",
+      chapters:["起步"],items:["BV1234567890"]}]}
+  }};
+  const next={type:"workbench_backup",state:{
+    videos:{"BV0987654321":{bvid:"BV0987654321",title:"第二段课程"}},
+    library:{topics:[{name:"电影专题",notes:"新备份提供的另一条笔记",
+      chapters:["后期"],items:["BV0987654321"]}]}
+  }};
+  const upload=async payload=>page.locator("#import-file").setInputFiles({
+    name:"private-backup.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(payload))
+  });
+  await upload(first);
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await upload(next);
+  await expect(page.locator("#stat-count")).toHaveText("2");
+  await page.locator("[data-tab=learning]").click();
+  await expect(page.locator("#learning-list")).toContainText("我原来的专属学习笔记");
+  await expect(page.locator("#learning-list")).toContainText("第一段课程");
+  await expect(page.locator("#learning-list")).toContainText("第二段课程");
+  await page.locator("[data-tab=library]").click();
+  await page.locator("#undo-import").click();
+  await expect(page.locator("#stat-count")).toHaveText("1");
+  await expect(page.locator("#library-list")).not.toContainText("第二段课程");
+  await page.reload();
+  await expect(page.locator("#stat-count")).toHaveText("1");
+});
+
+test("switching social accounts does not retain the old account's visible profile",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
+  await page.goto("/tongpin/");
+  const make=async(name)=>{
+    await page.locator("[data-tab=account]").click();
+    await page.locator('#auth-form [name="handle"]').fill(name);
+    await page.locator('#auth-form [name="password"]').fill("strong-password-123");
+    await page.locator('#auth-form [name="displayName"]').fill(name);
+    await page.locator('#auth-form [name="adult"]').check();
+    await page.locator("#auth-submit").click();
+    await expect(page.locator("#session-label")).toHaveText("@"+name);
+  };
+  await make("switch_alice_"+Date.now().toString(36));
+  await page.locator("#logout").click();
+  await expect(page.locator("#session-label")).toHaveText("离线私人模式");
+  await expect(page.locator("#chat-panel")).toBeHidden();
+  await expect(page.locator("#unread-count")).toBeHidden();
+  await make("switch_bob_"+Date.now().toString(36));
+  await page.locator("[data-tab=friends]").click();
+  await expect(page.locator("#friends-list")).toContainText("还没有好友");
+  await page.locator("[data-tab=learning]").click();
+  await expect(page.locator("#study-plans")).toContainText("还没有共学计划");
+});
