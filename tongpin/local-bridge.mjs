@@ -50,6 +50,9 @@ export async function localBfcImport(req,res,url) {
     if(backup.type!=="workbench_backup" || !backup.state || typeof backup.state!=="object"){
       throw Error("bfc_backup_format_invalid");
     }
+    const capabilities=await localJson("/api/capabilities").catch(()=>null);
+    backup.exportSource="bfc-local-bridge";
+    backup.completeSnapshot=capabilities?.bilibili?.completeSnapshot ?? null;
     reply(res,200,backup);
   }catch(error){
     reply(res,502,{error:"local_bfc_unavailable",detail:String(error.message||"unknown").slice(0,120)});
