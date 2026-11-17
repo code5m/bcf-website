@@ -19,8 +19,6 @@
       <button class="nav-item active" data-tab="library"><span aria-hidden="true">▶</span> 刷视频</button>
       <button class="nav-item" data-tab="discover"><span aria-hidden="true">✧</span> 遇见</button>
       <button class="nav-item" data-tab="friends"><span aria-hidden="true">♡</span> 消息 <small id="unread-count" hidden></small></button>
-      <button class="nav-item" data-tab="learning"><span aria-hidden="true">◫</span> 共学</button>
-      <button class="nav-item" data-tab="showcase"><span aria-hidden="true">✦</span> 分享</button>
       <button class="nav-item" data-tab="account"><span aria-hidden="true">◉</span> 我的</button>
     </nav>
     <div class="sidebar-footer">
@@ -34,8 +32,9 @@
       <div class="top-actions"><span id="session-label" class="session-label">离线私人模式</span><button class="button button-ghost" id="login-shortcut">登录 / 注册</button></div>
     </header>
     <div id="notice" role="status" aria-live="polite" class="notice" hidden></div>
+    <div id="toast-action" hidden></div>
     <section class="panel-section" id="tab-library">
-      <div class="hero hero-cinematic">
+      <div class="hero hero-cinematic" id="first-run-hero">
         <div class="hero-copy">
           <h2>喜欢的视频，<em>遇见同频的人。</em></h2>
           <p>整理自己的片单，分享愿意公开的内容。私人收藏和笔记默认只在本机。</p>
@@ -50,6 +49,10 @@
         <div id="feed-feature" class="feed-feature" aria-live="polite"></div>
         <div class="feed-rail"><strong>按兴趣刷</strong><div id="feed-channels" class="channel-list" role="group" aria-label="视频兴趣筛选"></div></div>
       </section>
+      <div class="match-home-link" id="home-match-hint" hidden>
+        <span id="home-match-message">你的片单可能与其他同好有交集。</span>
+        <button type="button" class="button button-soft" id="home-match-action">找相同收藏 →</button>
+      </div>
       <section class="community-zone" aria-label="公开精选视频">
         <div class="section-heading"><div><h3>大家在分享</h3><p>真实用户主动公开的精选视频 · 点击前往 B站</p></div><button class="button button-soft" id="refresh-community" aria-label="刷新公开分享">刷新</button></div>
         <div id="community-list" class="community-grid" aria-live="polite"><div class="community-empty">正在寻找真实用户的公开分享…</div></div>
@@ -60,12 +63,7 @@
           <div class="hero-actions"><button class="button button-soft" id="import-bfc-local">从本机 BFC 导入</button><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
         </div>
       </details>
-      <div class="stats">
-        <article><span>我的视频</span><strong id="stat-count">0</strong><small>私人片单</small></article>
-        <article><span>兴趣标签</span><strong id="stat-topics">0</strong><small>找到你的偏好</small></article>
-        <article><span>主动分享</span><strong id="stat-shared">0</strong><small>公开精选</small></article>
-      </div>
-      <div class="section-heading"><div><h3>我的片单</h3><p>原视频在 B站观看，卡片为本地主题视觉。</p></div><button class="button button-soft" id="add-trigger">＋ 添加</button></div>
+      <div class="section-heading"><div><h3>我的片单</h3><p>在 B站观看原视频；私人收藏默认不公开。</p></div><div class="playlist-actions"><button class="button button-soft" id="library-sharing">管理精选 <span id="draft-indicator" hidden></span></button><button class="button button-soft" id="add-trigger">＋ 添加</button></div></div>
       <div class="toolbar"><input type="search" id="library-search" placeholder="搜索视频标题、BV号、标签或 UP 主" aria-label="搜索本地收藏"><select id="library-tag"><option value="">全部标签</option></select></div>
       <div class="video-grid" id="library-list"></div>
       <div class="pager"><span id="library-page-label"></span><button class="button button-soft" id="page-prev">上一页</button><button class="button button-soft" id="page-next">下一页</button></div>
@@ -88,16 +86,32 @@
     </section>
     <section class="panel-section" id="tab-discover" hidden>
       <div class="section-heading"><div><h3>遇见同好</h3><p>基于主动公开的共同兴趣，不是 B站官方认证。</p></div><button class="button button-soft" id="refresh-people">刷新匹配</button></div>
-      <div class="meet-intro"><div><strong>从共同视频开始聊</strong><p>只根据双方公开的兴趣发现同好；互相同意后才可以私信。</p></div><button class="button button-soft" id="meet-profile-cta">完善兴趣 →</button></div>
+      <div class="meet-intro"><div><strong>从相同收藏开始认识</strong><p>仅在你的设备上，将私人 BV 收藏与别人主动公开的精选比较；不会向服务器上传私人收藏或匹配结果。</p></div><button class="button button-soft" id="meet-profile-cta">我的公开设置</button></div>
+      <div class="match-controls" role="group" aria-label="同好筛选">
+        <button id="match-filter-overlap" class="match-filter selected" aria-pressed="true">我也收藏了 <span id="local-match-count">0</span></button>
+        <button id="match-filter-all" class="match-filter" aria-pressed="false">其他同好</button>
+        <button id="match-more" class="button button-soft" hidden>继续寻找 →</button>
+        <span class="match-status" id="match-status" role="status" aria-live="polite"></span>
+      </div>
+      <div id="pending-contact" class="pending-contact" hidden></div>
       <div id="discover-list" class="people-grid"></div>
     </section>
     <section class="panel-section" id="tab-friends" hidden>
-      <div class="section-heading"><div><h3>消息 · 聊点喜欢的 <span id="pending-count" class="pending-count" hidden></span></h3><p>从共同喜欢的视频开启话题。好友申请需要对方同意，也可以随时结束聊天、拉黑或举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
+      <div class="section-heading"><div><h3>消息 <span id="pending-count" class="pending-count" hidden></span></h3><p>从共同视频开始聊天，申请需要对方同意。</p></div><div class="playlist-actions"><button class="button button-soft" id="friend-learning">共学计划</button><button class="button button-soft" id="refresh-friends">刷新</button></div></div>
       <div id="friends-list" class="people-grid"></div>
       <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><button class="button button-soft" id="load-older" hidden>加载更早的消息</button><div id="chat-list" class="chat-list"></div><div class="icebreakers"><span>没想好怎么开口？</span><button type="button" data-chat-prompt="最近看到哪条视频让你特别想分享？">聊聊最近看的</button><button type="button" data-chat-prompt="我们共同喜欢的内容里，你最推荐哪条？">求一个推荐</button></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
     </section>
     <section class="panel-section" id="tab-account" hidden>
-      <div class="section-heading"><div><h3>介绍一下自己</h3><p>无需注册即可使用私人收藏；想交友时再创建账号。</p></div></div>
+      <div class="section-heading"><div><h3>我的</h3><p>私人片单只在当前设备；公开分享由你决定。</p></div></div>
+      <div class="account-shortcuts" role="group" aria-label="我的内容">
+        <button type="button" class="account-shortcut" id="shortcut-showcase"><span aria-hidden="true">✦</span><strong>我的分享</strong><small>精选草稿与公开状态</small></button>
+        <button type="button" class="account-shortcut" id="shortcut-learning"><span aria-hidden="true">◫</span><strong>学习与共学</strong><small>专题、好友共学计划</small></button>
+      </div>
+      <div class="stats" aria-label="本地收藏概况">
+        <article><span>我的视频</span><strong id="stat-count">0</strong><small>私人片单</small></article>
+        <article><span>兴趣标签</span><strong id="stat-topics">0</strong><small>我的兴趣</small></article>
+        <article><span>已公开精选</span><strong id="stat-shared">0</strong><small>明确授权才公开</small></article>
+      </div>
       <div class="form-panel" id="auth-panel">
         <div class="auth-tabs"><button id="auth-mode-register" class="active">注册</button><button id="auth-mode-login">登录</button></div>
         <form id="auth-form" class="stacked-form">
