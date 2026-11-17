@@ -347,7 +347,15 @@ async function importPayload(parsed) {
 function exportLocal() {
   const data={type:"tongpin_private_library",version:2,exportedAt:new Date().toISOString(),
     videos:state.items,showcaseDraft:state.showcase,topics:state.topics};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const content=JSON.stringify(data,null,2);
+  if (window.TongpinNative?.postMessage) {
+    try {
+      window.TongpinNative.postMessage(JSON.stringify({type:"export",content}));
+      notify("请选择保存位置，将私人备份保存到你的 Android 设备。");
+      return;
+    }catch(error){notify("设备备份桥接不可用："+error.message,true);}
+  }
+  const blob=new Blob([content],{type:"application/json"});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
   a.href=url;a.download="tongpin-private-backup-"+new Date().toISOString().slice(0,10)+".json";
