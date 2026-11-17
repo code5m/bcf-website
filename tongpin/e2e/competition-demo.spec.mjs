@@ -48,6 +48,7 @@ test("contest journey: videos, shared favorite, consent, chat, reply and study",
 });
 
 test("entering and exiting demonstration never changes real private favorites",async({page})=>{
+  page.on("dialog",dialog=>dialog.accept());
   await page.goto("/tongpin/");
   await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
   await expect(page.locator("#stat-count")).toHaveText("0");
