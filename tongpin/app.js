@@ -236,25 +236,27 @@ function videoPoster(item,large=false){
   const url="https://www.bilibili.com/video/"+encodeURIComponent(item.bvid);
   const category=(item.tags||[])[0] || "VIDEO";
   return '<a class="video-poster '+posterTheme(item.bvid)+(large?" poster-large":"")+
-    '" href="'+url+'" target="_blank" rel="noopener noreferrer" aria-label="在 B站打开 '+escapeHtml(item.title)+'">'+
-    '<span class="poster-kicker">TONGPIN / CURATED</span>'+
+    '" href="'+url+'" target="_blank" rel="noopener noreferrer" aria-label="前往 B站观看 '+escapeHtml(item.title)+'">'+
+    '<span class="poster-kicker">VIDEO / BILIBILI</span>'+
     '<span class="poster-symbol" aria-hidden="true">'+escapeHtml(String(category).slice(0,5))+'</span>'+
-    '<span class="poster-play" aria-hidden="true">▶</span>'+
+    '<span class="poster-play" aria-hidden="true">↗</span>'+
     '<span class="poster-bottom">'+
     (large?'<strong>'+escapeHtml(item.title)+'</strong>':'')+
     '<small>在 B站观看 ↗</small></span></a>';
 }
 function cardHtml(item,place){
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
+  const published=Boolean(state.user?.showcase?.some(x=>x.bvid===item.bvid));
+  const visibility=published?"已公开":inDraft?"草稿 · 未公开":"仅自己可见";
   const buttons=place==="library"
-    ? '<button data-action="edit" data-id="'+item.bvid+'">✎ 编辑</button>'+
+    ? '<button data-action="edit" data-id="'+item.bvid+'">编辑</button>'+
       '<button class="'+(inDraft?"":"highlight")+'" data-action="toggle" data-id="'+item.bvid+'">'+
-      (inDraft?"✓ 已加入分享":"♡ 放进精选")+'</button>'+
+      (inDraft?"移出精选草稿":"加入精选草稿")+'</button>'+
       '<button class="card-danger" data-action="remove" data-id="'+item.bvid+'">删除</button>'
     : '<button data-action="toggle" data-id="'+item.bvid+'">移出分享</button>';
   return '<article class="video-card video-post-card">'+videoPoster(item)+
     '<div class="video-card-body"><div class="card-top"><span>'+escapeHtml(item.bvid)+'</span>'+
-    '<span>'+(item.watched?"✓ 已看过":"我的私人片单")+'</span></div>'+
+    '<span class="visibility-tag '+(published?"is-public":inDraft?"is-draft":"is-private")+'">'+visibility+'</span></div>'+
     '<h4>'+escapeHtml(item.title)+'</h4>'+
     '<p class="video-creator">'+escapeHtml(item.author||"收藏于我的片单")+'</p>'+
     '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
@@ -293,7 +295,7 @@ function renderFeed(){
     '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
     '<div class="spotlight-buttons"><a class="button button-primary" href="'+
     "https://www.bilibili.com/video/"+encodeURIComponent(item.bvid)+
-    '" target="_blank" rel="noopener noreferrer">▶ 去 B站观看</a>'+
+    '" target="_blank" rel="noopener noreferrer">前往 B站观看 ↗</a>'+
     '<button class="button button-soft" data-action="toggle" data-id="'+item.bvid+'">'+
     (inDraft?"✓ 已放进精选":"♡ 分享到精选")+'</button></div>'+
     '<small class="spotlight-disclaimer">精选只会保存草稿；正式公开仍需你到「分享」页确认。</small></div></article>';
@@ -315,7 +317,10 @@ function renderCommunityFeed(){
       '<button class="button button-primary" data-action="showcase">去整理我的精选 →</button></div>';
     return;
   }
-  target.innerHTML=state.communityFeed.map(item=>{
+  const localIds=new Set(state.items.map(video=>video.bvid));
+  const publicItems=[...state.communityFeed].sort((a,b)=>
+    Number(localIds.has(b.bvid))-Number(localIds.has(a.bvid)));
+  target.innerHTML=publicItems.map(item=>{
     const user=item.curator||{};
     const caption=item.caption?'<p class="community-caption">'+escapeHtml(item.caption)+'</p>':"";
     return '<article class="community-card">'+videoPoster(item)+
@@ -323,10 +328,11 @@ function renderCommunityFeed(){
       escapeHtml((user.displayName||user.handle||"?").slice(0,1))+'</div><div><b>'+
       escapeHtml(user.displayName||user.handle||"同频用户")+'</b><small>@'+
       escapeHtml(user.handle||"")+' · 主动公开精选</small></div></div>'+
-      '<h4>'+escapeHtml(item.title)+'</h4>'+caption+
-      '<div class="tags">'+tagsHtml(item.tags)+'</div>'+
+      '<h4>'+escapeHtml(item.title)+'</h4>'+
+      (localIds.has(item.bvid)?'<p class="public-overlap-note">✓ 我也收藏了 · 本机比对</p>':'')+
+      caption+'<div class="tags">'+tagsHtml(item.tags)+'</div>'+
       '<div class="community-cta"><button data-action="request" data-id="'+escapeHtml(user.id)+
-      '">♡ 申请认识 TA</button></div></div></article>';
+      '">从这条视频认识 TA</button></div></div></article>';
   }).join("");
 }
 let communityRequest=null,communityRequestEpoch=-1;
@@ -393,6 +399,7 @@ function renderLocal(){
   renderShowcase();
   if(state.tab==="learning")renderLearning();
   renderFeed();
+  renderCommunityFeed();
   if(state.tab==="discover" && $("discover-list"))renderPeople();
   $("first-run-hero").hidden=state.items.length>0;
   $("home-match-hint").hidden=state.items.length===0;
