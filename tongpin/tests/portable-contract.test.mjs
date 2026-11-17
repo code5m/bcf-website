@@ -63,3 +63,75 @@ test("1200-video private round trip preserves notes, source folders, topics and 
     assert.ok(original.tags.every(tag=>other.tags.includes(tag)),"original tags must survive topic enrichment");
   }
 });
+
+
+test("BrowserOS BFC workbench backup imports real library videos, topics, folders, notes and safe cover URLs",()=>{
+  const backup={
+    type:"workbench_backup",version:1,exportedAt:"2026-11-18T00:00:00.000Z",
+    state:{
+      library:{
+        videos:{
+          BV1234567890:{
+            bvid:"BV1234567890",title:"真实收藏视频一",author:"UP主一",
+            cover:"https://i0.hdslb.com/bfs/archive/real-cover-1.jpg",
+            sourceFolders:["默认收藏夹"],tags:["电影"]
+          }
+        },
+        topics:[{
+          name:"电影学习",
+          items:[
+            {bvid:"BV1234567890",title:"真实收藏视频一",author:"UP主一"},
+            {bvid:"BV0987654321",title:"专题中的第二条视频",author:"UP主二",
+              coverUrl:"https://archive.biliimg.com/bfs/archive/real-cover-2.jpg",
+              sourceFolders:["电影收藏夹"]}
+          ]
+        }],
+        categories:{"BV1234567890":"电影"}
+      },
+      notes:{"BV1234567890":"只属于本机的私人笔记"},
+      progress:{"BV1234567890":{percent:63,completed:false}},
+      watched:{"BV0987654321":true},
+      videos:{}
+    }
+  };
+  const result=normalizeImported(backup);
+  assert.equal(result.kind,"bfc-backup");
+  assert.equal(result.items.length,2);
+  const first=result.items.find(x=>x.bvid==="BV1234567890");
+  const second=result.items.find(x=>x.bvid==="BV0987654321");
+  assert.equal(first.title,"真实收藏视频一");
+  assert.equal(first.author,"UP主一");
+  assert.equal(first.coverUrl,"https://i0.hdslb.com/bfs/archive/real-cover-1.jpg");
+  assert.deepEqual(first.sourceFolders,["默认收藏夹"]);
+  assert.equal(first.notes,"只属于本机的私人笔记");
+  assert.equal(first.progress,63);
+  assert.ok(first.tags.includes("电影"));
+  assert.ok(first.topics.includes("电影学习"));
+  assert.equal(second.title,"专题中的第二条视频");
+  assert.equal(second.coverUrl,"https://archive.biliimg.com/bfs/archive/real-cover-2.jpg");
+  assert.equal(second.watched,true);
+  assert.deepEqual(second.sourceFolders,["电影收藏夹"]);
+  assert.equal(result.topics.length,1);
+  assert.ok(result.duplicates>=1);
+});
+
+test("BrowserOS readback pages are accepted but an incomplete traversal is clearly warned",()=>{
+  const result=normalizeImported({
+    source:"authorized_browser_readback",
+    scanId:"fixture",reportedTotal:80,expectedPages:4,traversalFinished:false,
+    pages:{"1":{items:[{bvid:"BV1234567890",title:"页面读取到的收藏"}]}}
+  });
+  assert.equal(result.items.length,1);
+  assert.equal(result.items[0].title,"页面读取到的收藏");
+  assert.ok(result.warnings.some(x=>x.includes("部分快照")));
+});
+
+test("importer rejects untrusted cover URLs and does not expose private notes in public picks",()=>{
+  const result=normalizeImported({type:"workbench_backup",state:{videos:[
+    {bvid:"BV1234567890",title:"视频",coverUrl:"https://attacker.example/fake.jpg",
+      notes:"PRIVATE_ONLY"}
+  ]}});
+  assert.equal(result.items[0].coverUrl,"");
+  assert.equal(result.items[0].notes,"PRIVATE_ONLY");
+  assert.equal(JSON.stringify(result.showcaseDraft||[]).includes("PRIVATE_ONLY"),false);
+});
