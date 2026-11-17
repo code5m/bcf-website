@@ -4,7 +4,7 @@ import {resolve} from "node:path";
 import {cleanText, cleanTopics, matchPublic, normalizeShowcase} from "./core.js";
 
 const SESSION_AGE = 7 * 86400 * 1000;
-const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: [], studyPlans: []});
+const empty = () => ({version: 1, users: [], sessions: [], connections: [], messages: [], reports: [], invites: [], studyPlans: [], appeals: [], adminAudit: [], readStates: [], recoveryCodes: []});
 const sha = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
 const publicProfile = user => ({
@@ -109,7 +109,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
   const store = new SocialStore(dataDir,empty);
   let serial = Promise.resolve();
   const rate = new Map();
-  async function read() { return store.read(); }
+  async function read() { return store.read({excludeMessages:true}); }
   async function transaction(action) {
     const task=serial.then(async()=>{
       const db=store.begin();
@@ -230,7 +230,10 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res,200,{
           type:"tongpin_social_account_export",exportedAt:new Date().toISOString(),account:ownProfile(me),
           connections:db.connections.filter(c=>c.from===me.id||c.to===me.id),
-          messages:db.messages.filter(m=>m.from===me.id||m.to===me.id),
+          messages:store.messagesForUser(me.id),
+          studyPlans:db.studyPlans.filter(p=>p.creatorId===me.id||p.partnerId===me.id),
+          appeals:db.appeals.filter(a=>a.userId===me.id),
+          readStates:db.readStates.filter(s=>s.userId===me.id),
           reports:db.reports.filter(r=>r.from===me.id)
         },{"Content-Disposition":'attachment; filename="tongpin-social-export.json"'});
         return true;
@@ -269,7 +272,11 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           const r=db.reports.find(x=>x.id===path.slice("/moderation/reports/".length));
           if(!r)fail(404,"report_not_found");
           if(!["dismiss","review","suspend"].includes(input.action))fail(400,"invalid_moderation_action");
+          if(r.reviewed)fail(409,"report_already_reviewed");
           r.reviewed=true;r.resolution=input.action;r.reviewedAt=new Date().toISOString();
+          db.adminAudit ||= [];
+          db.adminAudit.push({id:randomUUID(),action:"report_"+input.action,
+            target:r.target,reportId:r.id,createdAt:new Date().toISOString()});
           if(input.action==="suspend"){
             const u=byId(db,r.target);
             u.suspendedUntil=new Date(Date.now()+7*86400000).toISOString();
@@ -287,6 +294,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           if(!relation)fail(404,"relation_not_found");
           db.connections=db.connections.filter(c=>c.id!==id);
           db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===relation.from&&p.partnerId===relation.to)||(p.creatorId===relation.to&&p.partnerId===relation.from)));
+          db.readStates=(db.readStates||[]).filter(s=>!((s.userId===relation.from&&s.peerId===relation.to)||(s.userId===relation.to&&s.peerId===relation.from)));
           return true;
         });
         json(res,200,{ok:true});
@@ -458,6 +466,7 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           me.blocked = [...new Set([...(me.blocked || []), peer.id])];
           db.connections = db.connections.filter(c => !(c.from === me.id && c.to === peer.id || c.from === peer.id && c.to === me.id));
           db.studyPlans=(db.studyPlans||[]).filter(p=>!((p.creatorId===me.id&&p.partnerId===peer.id)||(p.creatorId===peer.id&&p.partnerId===me.id)));
+          db.readStates=(db.readStates||[]).filter(s=>!((s.userId===me.id&&s.peerId===peer.id)||(s.userId===peer.id&&s.peerId===me.id)));
           return true;
         });
         json(res, 200, {ok: true});
@@ -523,6 +532,9 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
           db.connections = db.connections.filter(c => c.from !== me.id && c.to !== me.id);
           db.messages = db.messages.filter(m => m.from !== me.id && m.to !== me.id);
           db.studyPlans=(db.studyPlans||[]).filter(p=>p.creatorId!==me.id&&p.partnerId!==me.id);
+          db.readStates=(db.readStates||[]).filter(s=>s.userId!==me.id&&s.peerId!==me.id);
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==me.id);
+          db.appeals=(db.appeals||[]).filter(x=>x.userId!==me.id);
           db.reports = db.reports.filter(r => r.from !== me.id && r.target !== me.id);
           db.users.forEach(u => {u.blocked = (u.blocked || []).filter(id => id !== me.id);});
           return true;
