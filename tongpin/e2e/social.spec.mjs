@@ -49,6 +49,9 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await publish(b);
     await a.locator("[data-tab=discover]").click();
     await expect(a.locator("#discover-list")).toContainText("Bob");
+    await expect(a.locator("#discover-list .meet-card")).toHaveCount(1);
+    await expect(a.locator("#discover-list .meet-card-banner")).toContainText("你们都分享过");
+    await expect(a.locator("#discover-list .public-picks")).toHaveCount(1);
     await expect(a.locator("#discover-list")).not.toContainText("Bob的内容");
     await a.locator("#discover-list [data-action=request]").click();
     await b.locator("[data-tab=friends]").click();
@@ -60,6 +63,10 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await a.locator("#chat-text").fill("一起学习电影制作吗？");
     await a.locator('#chat-form .button-primary').click();
     await expect(a.locator("#chat-list")).toContainText("一起学习电影制作吗？");
+    await expect(a.locator("#chat-panel .icebreakers")).toBeVisible();
+    await a.locator('[data-chat-prompt="我们共同喜欢的内容里，你最推荐哪条？"]').click();
+    await expect(a.locator("#chat-text")).toHaveValue("我们共同喜欢的内容里，你最推荐哪条？");
+    await a.locator("#chat-text").fill("");
     await b.locator("#refresh-friends").click();
     await b.locator("#friends-list [data-action=chat]").click();
     await expect(b.locator("#chat-list")).toContainText("一起学习电影制作吗？");
