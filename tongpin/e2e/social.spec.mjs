@@ -80,6 +80,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await b.locator("[data-tab=friends]").click();
     await b.locator("#friends-list [data-action=block]").click();
     await expect(b.locator("#friends-list")).not.toContainText("Alice");
+    await a.locator("[data-tab=friends]").click();
     await a.locator("#refresh-friends").click();
     await expect(a.locator("#friends-list")).not.toContainText("Bob");
   } finally {
