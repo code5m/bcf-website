@@ -20,7 +20,7 @@
       <button class="nav-item" data-tab="learning"><span>◫</span> 学习专题</button>
       <button class="nav-item" data-tab="showcase"><span>◈</span> 收藏橱窗</button>
       <button class="nav-item" data-tab="discover"><span>✧</span> 发现同频</button>
-      <button class="nav-item" data-tab="friends"><span>♡</span> 好友与消息</button>
+      <button class="nav-item" data-tab="friends"><span>♡</span> 好友与消息 <small id="unread-count" hidden></small></button>
       <button class="nav-item" data-tab="account"><span>⚙</span> 账户设置</button>
     </nav>
     <div class="sidebar-footer">
@@ -71,13 +71,13 @@
       <div id="showcase-list" class="video-grid"></div>
     </section>
     <section class="panel-section" id="tab-discover" hidden>
-      <div class="section-heading"><div><span class="overline">PEOPLE WITH SHARED INTERESTS</span><h3>发现同频的人</h3><p>匹配只参考双方主动公开的收藏、标签和兴趣。相似度是排序分数，不是心理学意义上的契合百分比。</p></div><button class="button button-soft" id="refresh-people">刷新匹配</button></div>
+      <div class="section-heading"><div><span class="overline">PEOPLE WITH SHARED INTERESTS</span><h3>发现同频的人</h3><p>以下内容是用户自行发布的精选视频，不代表 B站已核验双方真实收藏关系。</p><p>匹配只参考双方主动公开的收藏、标签和兴趣。相似度是排序分数，不是心理学意义上的契合百分比。</p></div><button class="button button-soft" id="refresh-people">刷新匹配</button></div>
       <div id="discover-list" class="people-grid"></div>
     </section>
     <section class="panel-section" id="tab-friends" hidden>
       <div class="section-heading"><div><span class="overline">CONNECTIONS</span><h3>好友与消息 <span id="pending-count" class="pending-count" hidden></span></h3><p>只有对方接受交友申请后才能聊天。可随时拉黑、举报。</p></div><button class="button button-soft" id="refresh-friends">刷新</button></div>
       <div id="friends-list" class="people-grid"></div>
-      <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><div id="chat-list" class="chat-list"></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
+      <section id="chat-panel" class="chat-panel" hidden><div class="chat-title"><h3 id="chat-heading">消息</h3><button class="button button-soft" id="close-chat">关闭</button></div><button class="button button-soft" id="load-older" hidden>加载更早的消息</button><div id="chat-list" class="chat-list"></div><form id="chat-form" class="chat-compose"><input id="chat-text" maxlength="1000" placeholder="发送一条友善的消息…" required><button class="button button-primary">发送</button></form></section>
     </section>
     <section class="panel-section" id="tab-account" hidden>
       <div class="section-heading"><div><span class="overline">PRIVACY & IDENTITY</span><h3>账户与公开设置</h3><p>无需注册即可使用私人收藏；想交友时再创建账号。</p></div></div>
@@ -91,6 +91,14 @@
           <label id="adult-field" class="check-label"><input name="adult" type="checkbox"> 我已年满 18 岁，且同意 <a href="/tongpin/terms.html" target="_blank">使用条款与隐私说明</a></label>
           <button class="button button-primary" id="auth-submit">创建账号</button>
         </form>
+        <details class="password-form"><summary>忘记密码？使用事先保存的恢复码</summary>
+          <form id="recover-form" class="stacked-form">
+            <label>用户名<input name="handle" required autocomplete="username" minlength="3"></label>
+            <label>一次性恢复码<input name="code" required maxlength="24" minlength="24" autocomplete="off"></label>
+            <label>新密码（至少12位）<input type="password" name="newPassword" required minlength="12" autocomplete="new-password"></label>
+            <button class="button button-soft">使用恢复码重置密码</button>
+          </form>
+        </details>
       </div>
       <div id="profile-panel" class="form-panel" hidden>
         <form id="profile-form" class="stacked-form">
@@ -107,6 +115,19 @@
           <label>当前密码<input name="currentPassword" type="password" minlength="12" required autocomplete="current-password"></label>
           <label>新密码（至少12位）<input name="newPassword" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
           <button class="button button-soft">修改密码并退出其他设备</button>
+        </form>
+        <form id="recovery-codes-form" class="stacked-form password-form">
+          <h4>账号恢复码（仅生成时展示）</h4>
+          <label>当前密码<input name="password" type="password" autocomplete="current-password" minlength="12" required></label>
+          <button class="button button-soft">生成 8 个一次性恢复码（将使旧码失效）</button>
+          <pre id="recovery-codes-output" class="recovery-output" aria-live="polite"></pre>
+        </form>
+        <form id="appeal-form" class="stacked-form password-form">
+          <h4>账户申诉</h4>
+          <p class="small-copy">如账户受到限制，可提交申诉，由管理员人工复核；此功能不承诺自动恢复。</p>
+          <label>申诉理由<textarea name="details" rows="3" minlength="15" maxlength="1000" required></textarea></label>
+          <button class="button button-soft">提交申诉</button>
+          <div id="appeal-history" class="small-copy"></div>
         </form>
         <div class="danger-actions"><button class="button button-soft" id="export-social">导出社交数据</button><button class="button button-danger" id="clear-private">清空本设备私人数据</button><button class="button button-soft" id="logout">退出登录</button><button class="button button-danger" id="delete-account">永久删除社交账户</button></div>
         <h4>已拉黑用户</h4><div id="blocked-list" class="blocked-list"></div>

@@ -52,3 +52,34 @@ $("invite-create").onclick=async()=>{
    status("邀请码已生成：请安全转交给邀请用户，本页面不保存明文，刷新后不可再次查看。");
  }catch(e){status("创建邀请码失败："+e.message);}
 };
+
+async function loadAppeals(){
+  if(!secret)return;
+  const {appeals}=await call("/moderation/appeals");
+  $("appeals").replaceChildren();
+  for(const appeal of appeals.slice().reverse()){
+    const card=add($("appeals"),"article","");
+    card.className="person-card";
+    add(card,"h3",appeal.handle+" · "+appeal.status);
+    add(card,"p","申诉理由："+appeal.details);
+    if(appeal.status==="pending"){
+      for(const [label,action] of [["通过并解除封禁","accept"],["驳回申诉","reject"]]){
+        const button=add(card,"button",label);button.className="button button-soft";
+        button.onclick=async()=>{
+          const resolution=prompt("请填写本次审核处理说明（可留空）","")||"";
+          try{await call("/moderation/appeals/"+appeal.id,"PUT",{action,resolution});await refresh();await loadAppeals();}
+          catch(e){status("处理失败："+e.message);}
+        };
+      }
+    }
+  }
+  const {audit}=await call("/moderation/audit");
+  $("audit").replaceChildren();
+  for(const event of audit.slice(-60).reverse()){
+    const card=add($("audit"),"article","");
+    card.className="person-card";
+    add(card,"h4",event.action);
+    add(card,"p",event.createdAt+" · 目标ID "+event.target);
+  }
+}
+$("refresh").addEventListener("click",()=>loadAppeals().catch(e=>status("申诉或审计读取失败："+e.message)));
