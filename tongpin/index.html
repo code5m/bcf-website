@@ -40,7 +40,7 @@
           <span class="eyebrow">YOUR OWN DIGITAL COLLECTION</span>
           <h2>把喜欢的内容，<br>变成属于你的世界。</h2>
           <p>先把收藏带回本地，再决定哪些值得分享。你的私人笔记、原始收藏夹和学习记录不会自动上传。</p>
-          <div class="hero-actions"><button class="button button-primary" id="import-trigger">导入 JSON 备份</button><button class="button button-soft" id="import-bfc-local">从本机 BFC 一键导入</button><button class="button button-soft" id="export-trigger">导出备份</button></div>
+          <div class="hero-actions"><button class="button button-primary" id="import-trigger">导入 JSON 备份</button><button class="button button-soft" id="import-bfc-local">从本机 BFC 一键导入</button><button class="button button-soft" id="export-trigger">导出备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
         </div>
         <div class="hero-art" aria-hidden="true"><div class="art-orbit orbit-a"></div><div class="art-orbit orbit-b"></div><div class="art-center">◈</div><div class="art-pill p1">AI 创作</div><div class="art-pill p2">电影学习</div><div class="art-pill p3">编程</div></div>
       </div>
@@ -108,7 +108,7 @@
           <label>新密码（至少12位）<input name="newPassword" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
           <button class="button button-soft">修改密码并退出其他设备</button>
         </form>
-        <div class="danger-actions"><button class="button button-soft" id="export-social">导出社交数据</button><button class="button button-soft" id="logout">退出登录</button><button class="button button-danger" id="delete-account">永久删除社交账户</button></div>
+        <div class="danger-actions"><button class="button button-soft" id="export-social">导出社交数据</button><button class="button button-danger" id="clear-private">清空本设备私人数据</button><button class="button button-soft" id="logout">退出登录</button><button class="button button-danger" id="delete-account">永久删除社交账户</button></div>
         <h4>已拉黑用户</h4><div id="blocked-list" class="blocked-list"></div>
       </div>
     </section>

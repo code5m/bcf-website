@@ -28,7 +28,7 @@ export function normalizeShowcase(items) {
     const title = cleanText(item.title, 120);
     if (!title) throw new Error("video_title_required");
     return {
-      bvid, title, tags: cleanTopics(item.tags, 5),
+      bvid, title, tags: cleanTopics(item.tags, 5), source: "user-curated",
       caption: cleanText(item.caption, 160), url: videoUrl(bvid)
     };
   });
@@ -116,7 +116,7 @@ export function normalizeImported(payload) {
   for (const [key, raw] of sourceEntries) add(raw, key);
   // Legacy BFC Studio exports may contain only library topics/categories/progress,
   // without video metadata. Keep known BV references but never invent original titles.
-  const orphanIds = new Set([...placeholders, ...Object.keys(categories), ...Object.keys(watched), ...Object.keys(progress)]);
+  const orphanIds = new Set([...placeholders, ...Object.keys(categories), ...Object.keys(notes), ...Object.keys(watched), ...Object.keys(progress)]);
   if (orphanIds.size > MAX_IMPORT) throw new Error("import_limit_30000");
   let metadataOnly = 0;
   for (const id of orphanIds) {
