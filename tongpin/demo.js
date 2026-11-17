@@ -47,7 +47,6 @@ export function mountDemo(root,{onExit}={}){
     sent:false,replyCount:0
   };
   const shared=p=>p.published.filter(id=>state.selected.has(id));
-  const phase=state.messages.length?4:state.relation==="accepted"?3:state.relation==="pending"?2:1;
   function top(){
     return '<header class="tpd-top"><a class="tpd-brand" href="/tongpin/?demo=1" aria-label="同频 APP 演示首页">'+
       '<span class="tpd-brand-glyph">◉</span><span>同频 <small>TONGPIN</small></span></a>'+
@@ -68,6 +67,7 @@ export function mountDemo(root,{onExit}={}){
       '" aria-current="'+(state.tab===tab?"page":"false")+'"><span>'+icon(ic)+'</span><small>'+name+'</small></button>').join("")+'</nav>';
   }
   function path(){
+    const phase=state.messages.length?4:state.relation==="accepted"?3:state.relation==="pending"?2:1;
     const steps=["刷到喜欢的视频","发现同一份热爱","双方愿意认识","聊出新的可能"];
     return '<div class="tpd-steps" aria-label="90 秒演示流程">'+steps.map((x,i)=>
       '<div class="'+(i<phase?"done":i===phase?"current":"")+'"><span>'+(i+1)+'</span><small>'+
@@ -225,31 +225,47 @@ export function mountDemo(root,{onExit}={}){
       render();return;
     }
     if(act==="find-video"){
-      state.activePerson=people.find(p=>p.published.includes(id))?.id||"lan";
+      const next=people.find(p=>p.published.includes(id))?.id||"lan";
+      if(next!==state.activePerson){
+        state.activePerson=next;state.relation="none";state.messages=[];state.study=false;
+        state.goals.clear();state.replyCount=0;
+      }
       changeTab("meet");return;
     }
     if(act==="select-person"){
       if(!person(id))return;
-      state.activePerson=id;
-      if(state.relation!=="none" && state.activePerson!=="lan")state.relation="none";
+      if(id!==state.activePerson){
+        state.activePerson=id;state.relation="none";state.messages=[];state.study=false;
+        state.goals.clear();state.replyCount=0;
+      }
       render();
       root.querySelector(".tpd-match-detail")?.scrollIntoView({behavior:"smooth",block:"nearest"});
       return;
     }
-    if(act==="request"){state.relation="pending";changeTab("meet");return;}
-    if(act==="accept"){state.relation="accepted";changeTab("messages");return;}
+    if(act==="request"){
+      if(state.relation!=="none")return;
+      state.relation="pending";changeTab("meet");return;
+    }
+    if(act==="accept"){
+      if(state.relation!=="pending")return;
+      state.relation="accepted";changeTab("messages");return;
+    }
     if(act==="suggest"){
       const input=root.querySelector('#tpd-chat-form input');
       if(input){input.value=button.dataset.text||"";input.focus();}return;
     }
     if(act==="reply"){
-      if(!state.messages.some(m=>m.from==="me"))return;
+      if(state.relation!=="accepted"||!state.messages.some(m=>m.from==="me"))return;
       const options=["是的！我也被那个镜头打动了。","好啊，我们可以先从一个小分镜开始。","那我们就约个时间，一起做一段短片吧！"];
       state.messages.push({from:"peer",text:options[state.replyCount++%options.length]});
       render();return;
     }
-    if(act==="study"){state.study=!state.study;render();return;}
+    if(act==="study"){
+      if(state.relation!=="accepted"||!state.messages.some(m=>m.from==="me"))return;
+      state.study=!state.study;render();return;
+    }
     if(act==="goal"){
+      if(!state.study||state.relation!=="accepted")return;
       const i=Number(button.dataset.index);
       if(!Number.isInteger(i)||i<0||i>2)return;
       if(state.goals.has(i))state.goals.delete(i);else state.goals.add(i);
