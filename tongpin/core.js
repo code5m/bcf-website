@@ -83,11 +83,15 @@ export function normalizeImported(payload) {
   }
   const readbackPages=dictionary(payload.pages);
   const readbackVideos=Object.values(readbackPages).flatMap(page=>shortList(page?.items));
-  const source = Array.isArray(root) ? root :
-    pick(library.videos,library.records,library.items,root.videos,root.records,root.items,
-      root.data?.list,root.data?.items,readbackVideos);
-  const sourceEntries = Array.isArray(source) ? source.map((value, index) => [String(index), value]) :
-    source && typeof source === "object" ? Object.entries(source) : [];
+  const sourceCollections=Array.isArray(root)?[root]:[
+    library.videos,library.records,library.items,root.videos,root.records,root.items,
+    root.data?.list,root.data?.items,readbackVideos
+  ].filter(value=>Array.isArray(value)||(value&&typeof value==="object"));
+  const sourceEntries=[];
+  for(const source of sourceCollections){
+    if(Array.isArray(source))source.forEach((value,index)=>sourceEntries.push([String(index),value]));
+    else for(const [key,value] of Object.entries(source))sourceEntries.push([key,value]);
+  }
   for(const [id,video] of topicVideos)sourceEntries.push([id,video]);
   if (sourceEntries.length > MAX_IMPORT) throw new Error("import_limit_30000");
   const byId = new Map();
