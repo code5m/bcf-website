@@ -47,6 +47,10 @@ test("private library, opt-in share, real matching, mutual consent and messaging
     await addPrivate(b,"Bob的内容");
     await register(b,"bob_"+suffix,"Bob");
     await publish(b);
+    await b.locator("[data-tab=library]").click();
+    await expect(b.locator("#community-list .community-card")).toHaveCount(1);
+    await expect(b.locator("#community-list")).toContainText("AI 电影制作入门");
+    await expect(b.locator("#community-list")).not.toContainText("Alice的内容");
     await a.locator("[data-tab=discover]").click();
     await expect(a.locator("#discover-list")).toContainText("Bob");
     await expect(a.locator("#discover-list .meet-card")).toHaveCount(1);
