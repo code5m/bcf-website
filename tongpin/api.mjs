@@ -208,6 +208,94 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {user: user ? ownProfile(user) : null});
         return true;
       }
+      if (method === "POST" && path === "/account/recovery-codes") {
+        limit(req,"recovery-code-create",8,3600000);
+        const input=await methodBody(req);
+        const codes=await transaction(db=>{
+          const me=auth(db,req);
+          if(!passwordValid(String(input.password||""),me.passwordHash))fail(403,"invalid_password");
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==me.id);
+          const codes=Array.from({length:8},()=>randomBytes(12).toString("hex"));
+          for(const code of codes)db.recoveryCodes.push({id:randomUUID(),userId:me.id,codeHash:sha(code)});
+          return codes;
+        });
+        json(res,201,{codes,notice:"Show once and store offline"});
+        return true;
+      }
+      if (method === "POST" && path === "/account/recover") {
+        limit(req,"recovery-use",6,3600000);
+        const input=await methodBody(req);
+        const password=String(input.newPassword||"");
+        const code=String(input.code||"");
+        if(password.length<12||password.length>128)fail(400,"invalid_new_password");
+        if(!/^[a-f0-9]{24}$/.test(code))fail(403,"invalid_recovery_code");
+        await transaction(db=>{
+          const user=db.users.find(u=>u.handle===cleanText(input.handle,30).toLowerCase());
+          const found=user&&(db.recoveryCodes||[]).find(c=>c.userId===user.id&&c.codeHash===sha(code));
+          if(!found)fail(403,"invalid_recovery_code");
+          user.passwordHash=passwordHash(password);
+          db.sessions=db.sessions.filter(s=>s.userId!==user.id);
+          db.recoveryCodes=(db.recoveryCodes||[]).filter(c=>c.userId!==user.id);
+          return true;
+        });
+        json(res,200,{ok:true,reloginRequired:true});
+        return true;
+      }
+      if (method === "POST" && path === "/appeals") {
+        limit(req,"appeal-create",3,86400000);
+        const input=await methodBody(req);
+        const details=cleanText(input.details,1000);
+        if(details.length<15)fail(400,"appeal_too_short");
+        const id=await transaction(db=>{
+          const me=auth(db,req,{allowSuspended:true});
+          if((db.appeals||[]).some(a=>a.userId===me.id&&a.status==="pending"))fail(409,"pending_appeal_exists");
+          const id=randomUUID();
+          db.appeals.push({id,userId:me.id,details,status:"pending",createdAt:new Date().toISOString()});
+          return id;
+        });
+        json(res,201,{id,status:"pending"});
+        return true;
+      }
+      if (method === "GET" && path === "/appeals") {
+        const db=await read(),me=auth(db,req,{allowSuspended:true});
+        json(res,200,{appeals:db.appeals.filter(a=>a.userId===me.id).map(a=>({
+          id:a.id,details:a.details,status:a.status,createdAt:a.createdAt,resolution:a.resolution||null
+        }))});
+        return true;
+      }
+      if (method === "GET" && path === "/moderation/appeals") {
+        verifyAdmin(req);
+        const db=await read();
+        json(res,200,{appeals:db.appeals.slice(-200).map(a=>({
+          ...a,handle:db.users.find(u=>u.id===a.userId)?.handle||"deleted"
+        }))});
+        return true;
+      }
+      if (method === "PUT" && path.startsWith("/moderation/appeals/")) {
+        verifyAdmin(req);
+        const input=await methodBody(req);
+        if(!["accept","reject"].includes(input.action))fail(400,"invalid_appeal_resolution");
+        await transaction(db=>{
+          const appeal=db.appeals.find(x=>x.id===path.split("/").at(-1)&&x.status==="pending");
+          if(!appeal)fail(404,"pending_appeal_not_found");
+          appeal.status=input.action==="accept"?"approved":"rejected";
+          appeal.resolution=cleanText(input.resolution,300);
+          appeal.reviewedAt=new Date().toISOString();
+          const user=db.users.find(u=>u.id===appeal.userId);
+          if(user&&input.action==="accept")user.suspendedUntil=null;
+          db.adminAudit.push({id:randomUUID(),action:"appeal_"+input.action,
+            target:appeal.userId,appealId:appeal.id,createdAt:new Date().toISOString()});
+          return true;
+        });
+        json(res,200,{ok:true});
+        return true;
+      }
+      if (method === "GET" && path === "/moderation/audit") {
+        verifyAdmin(req);
+        const db=await read();
+        json(res,200,{audit:db.adminAudit.slice(-200)});
+        return true;
+      }
       if (method === "PUT" && path === "/account/password") {
         limit(req,"password-change",8,3600000);
         const input=await methodBody(req);
@@ -482,14 +570,50 @@ export function createSocialApi({dataDir = resolve("runtime/social")} = {}) {
         json(res, 200, {ok: true});
         return true;
       }
+      if (method === "GET" && path === "/notifications") {
+        limit(req,"notifications",60,60000);
+        const db=await read(),me=auth(db,req);
+        const pending=db.connections.filter(c=>c.to===me.id&&c.status==="pending"&&!peersBlocked(me,byId(db,c.from))).length;
+        const studyInvites=db.studyPlans.filter(p=>p.partnerId===me.id&&p.status==="pending"&&
+          connected(db,p.creatorId,me.id)).length;
+        const unread=store.unreadForUser(me.id,db.readStates);
+        json(res,200,{pending,studyInvites,unread,total:pending+studyInvites+unread.reduce((sum,p)=>sum+p.count,0)});
+        return true;
+      }
+      if (method === "POST" && path === "/messages/read") {
+        const input=await methodBody(req);
+        const at=await transaction(db=>{
+          const me=auth(db,req),peer=byId(db,input.peerId);
+          if(!connected(db,me.id,peer.id)||peersBlocked(me,peer))fail(403,"friendship_required");
+          const last=store.db.prepare("SELECT created_at FROM messages WHERE owner=? AND peer=? ORDER BY created_at DESC,id DESC LIMIT 1").get(peer.id,me.id);
+          if(!last)return null;
+          const state=db.readStates.find(s=>s.userId===me.id&&s.peerId===peer.id);
+          if(state)state.lastReadAt=last.created_at;
+          else db.readStates.push({id:randomUUID(),userId:me.id,peerId:peer.id,lastReadAt:last.created_at});
+          return last.created_at;
+        });
+        json(res,200,{ok:true,lastReadAt:at});
+        return true;
+      }
       if (method === "GET" && path === "/messages") {
         limit(req, "message-read", 80, 60000);
         const db = await read();
         const me = auth(db, req);
         const peer = byId(db, url.searchParams.get("peer"));
         if (peersBlocked(me, peer) || !connected(db, me.id, peer.id)) fail(403, "friendship_required");
-        const messages = db.messages.filter(m => (m.from === me.id && m.to === peer.id || m.from === peer.id && m.to === me.id)).slice(-100);
-        json(res, 200, {messages});
+        const raw=url.searchParams.get("before");
+        let before=null;
+        if(raw){
+          try{
+            const cursor=JSON.parse(Buffer.from(raw,"base64url").toString("utf8"));
+            if(typeof cursor.createdAt!=="string"||!/^[0-9a-f-]{36}$/.test(cursor.id))throw Error();
+            before=cursor;
+          }catch{fail(400,"invalid_cursor");}
+        }
+        const {messages,hasMore}=store.messagesBetween(me.id,peer.id,{limit:50,before});
+        const first=messages[0];
+        const nextCursor=hasMore&&first?Buffer.from(JSON.stringify({createdAt:first.createdAt,id:first.id})).toString("base64url"):null;
+        json(res,200,{messages,nextCursor,hasMore});
         return true;
       }
       if (method === "POST" && path === "/messages") {
