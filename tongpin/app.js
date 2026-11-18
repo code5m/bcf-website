@@ -2,6 +2,12 @@ import {bvidOf, cleanTopics, normalizeImported, matchLocalFavorites, MAX_SHOWCAS
 import {inspectBrowserosImport} from "./browseros-import.js";
 
 const $ = id => document.getElementById(id);
+const ownerSetupMode=new URLSearchParams(location.search).get("setup")==="1";
+function configureOwnerSetup(){
+  for(const id of ["import-trigger","add-trigger","owner-setup-tools","legacy-workbench-link","owner-setup-badge"]){
+    const el=$(id);if(el)el.hidden=!ownerSetupMode;
+  }
+}
 let contestMounted=false,liveAppInitialized=false,contestCleanup=null;
 async function showContestDemo(){
   if(contestMounted)return;
@@ -302,14 +308,14 @@ function renderFeed(){
   const filtered=state.feedTag?state.items.filter(item=>(item.tags||[]).includes(state.feedTag)):state.items;
   $("feed-status").textContent=state.items.length?
     filtered.length+" 条私人视频 · 在 B站观看"+(state.feedTag?" · #"+state.feedTag:""):
-    "导入私人片单，或看看大家公开分享的视频。";
+    "看看大家主动公开的视频，发现共同喜欢的内容。";
   const item=filtered[0];
   if(!item){
     $("feed-feature").innerHTML='<div class="spotlight-empty"><span class="spotlight-spark" aria-hidden="true">▶</span>'+
-      '<div><span class="overline">MAKE IT YOURS</span><h4>第一条视频，等你带进来。</h4>'+
-      '<p>把 BFC 收藏或 JSON 片单导入，就能从海报式视频卡片开始浏览。也可以先遇见已经主动分享内容的真实用户。</p>'+
-      '<div class="spotlight-buttons"><button data-action="import" class="button button-primary">导入视频</button>'+
-      '<button data-action="discover" class="button button-soft">去遇见同好</button></div></div></div>';
+      '<div><span class="overline">DISCOVER TOGETHER</span><h4>从喜欢的内容，遇见同频的人。</h4>'+
+      '<p>这里展示真实用户主动公开的精选；还没有真实内容时，可以先体验明确标注的互动演示。</p>'+
+      '<div class="spotlight-buttons"><button data-action="discover" class="button button-primary">发现同好 →</button>'+
+      '<button data-action="try-demo" class="button button-soft">体验 APP 演示</button></div></div></div>';
     return;
   }
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
@@ -338,8 +344,8 @@ function renderCommunityFeed(){
   }
   if(!state.communityFeed.length){
     target.innerHTML='<div class="community-empty"><strong>还没有人公开分享视频。</strong>'+
-      '<p>这里不会放虚构视频充数。你可以从自己的真实收藏里选择几条，成为首批分享者。</p>'+
-      '<button class="button button-primary" data-action="showcase">去整理我的精选 →</button></div>';
+      '<p>真实用户尚未主动公开内容。正式视频流不会用虚构视频冒充真实分享。</p>'+
+      '<button class="button button-soft" data-action="try-demo">体验模拟交友流程 →</button></div>';
     return;
   }
   const localIds=new Set(state.items.map(video=>video.bvid));
@@ -428,6 +434,7 @@ function renderLibraryList(){
   $("page-next").disabled=state.page>=pages;
 }
 function renderLocal(){
+  $("personal-library").hidden=!ownerSetupMode && !state.items.length;
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
   $("stat-topics").textContent=new Set(state.items.flatMap(i=>i.tags||[])).size.toLocaleString("zh-CN");
   $("stat-shared").textContent=state.user?.showcase?.length||0;
@@ -1043,7 +1050,8 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
-    if(action==="import"){$("browseros-preview-file").click();return;}
+    if(action==="try-demo"){showContestDemo();return;}
+    if(action==="import"){if(ownerSetupMode)$("browseros-preview-file").click();return;}
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
@@ -1180,6 +1188,7 @@ async function actionHandler(event) {
   }catch(e){notify(e.message,true);}
 }
 function wire() {
+  configureOwnerSetup();
   wireBrowserosPreview();
   $("contest-demo-top").onclick=showContestDemo;
   $("contest-demo-hero").onclick=showContestDemo;
@@ -1235,6 +1244,7 @@ function wire() {
     $("local-bridge-status").textContent="当前是远程或移动端模式：请选择本地 JSON 备份手动导入，绝不远程访问你的 BFC 私人服务。";
   }
   $("export-trigger").onclick=exportLocal;
+  $("export-private-account").onclick=exportLocal;
   $("undo-import").onclick=async()=>{
     if(!confirm("恢复到上一次导入前的本地收藏快照？导入之后新增的本地修改会一并撤销。"))return;
     try{await restoreLastImport();await refreshLocal();notify("已恢复到上次导入之前。");}

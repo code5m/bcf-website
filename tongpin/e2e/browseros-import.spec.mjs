@@ -7,7 +7,7 @@ test("BrowserOS bookmarks preview -> select real-shaped videos -> private local 
     if(req.url().includes("/api/social/")&&req.method()!=="GET")posts.push(req.url());
   });
   await page.setViewportSize({width:390,height:844});
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
   const bookmarks={roots:{bookmark_bar:{name:"书签栏",children:[
     {name:"AI收藏",children:[{name:"AI影片创作",url:"https://www.bilibili.com/video/BV1234567890"}]},
@@ -15,6 +15,7 @@ test("BrowserOS bookmarks preview -> select real-shaped videos -> private local 
     {name:"同一个影片的另一份收藏",url:"https://www.bilibili.com/video/BV1234567890"},
     {name:"排除的网站",url:"https://example.com/video/BV1111111111"}
   ]}}};
+  await expect(page.locator("#owner-setup-tools")).toBeVisible();
   await page.locator("#browseros-preview-file").setInputFiles({name:"BrowserOS-Bookmarks.json",
     mimeType:"application/json",buffer:Buffer.from(JSON.stringify(bookmarks))});
   await expect(page.locator("#browseros-preview-dialog")).toBeVisible();
@@ -43,7 +44,7 @@ test("BrowserOS bookmarks preview -> select real-shaped videos -> private local 
 
 test("BFC backup preview shows missing titles without auto-publishing private notes",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
   const backup={type:"workbench_backup",state:{videos:{
     BV1234567890:{title:"摄影剪辑基础",author:"示例UP主"}},
@@ -63,4 +64,25 @@ test("BFC backup preview shows missing titles without auto-publishing private no
   await expect(page.locator("#library-list")).toContainText("绝不发到服务器的笔记");
   await page.locator("#nav [data-tab=account]").click();
   await expect(page.locator("#stat-shared")).toHaveText("0");
+});
+
+
+test("consumer APP shows only video and social journeys, not import controls",async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/tongpin/");
+  await expect(page.locator("#feed-feature .spotlight-empty")).toBeVisible();
+  await expect(page.locator("#nav .nav-item")).toHaveCount(4);
+  await expect(page.locator("#import-trigger")).toBeHidden();
+  await expect(page.locator("#owner-setup-tools")).toBeHidden();
+  await expect(page.locator("#add-trigger")).toBeHidden();
+  await expect(page.locator("#personal-library")).toBeHidden();
+  await expect(page.locator("#legacy-workbench-link")).toBeHidden();
+  await expect(page.locator("#feed-feature")).not.toContainText("导入视频");
+  await expect(page.locator("#community-list")).not.toContainText("导入视频");
+  await page.goto("/tongpin/?setup=1");
+  await expect(page.locator("#import-trigger")).toBeVisible();
+  await expect(page.locator("#owner-setup-tools")).toBeVisible();
+  await expect(page.locator("#add-trigger")).toBeVisible();
+  await expect(page.locator("#owner-setup-badge")).toContainText("私人收藏迁移模式");
+  await expect(page.locator("#personal-library")).toBeVisible();
 });

@@ -75,7 +75,10 @@ test("cache refresh does not replace unchanged public feed and mobile buttons re
   await expect(page.locator("#nav .nav-item")).toHaveCount(4);
   await page.locator("#nav [data-tab=account]").click();
   await page.locator("#nav [data-tab=library]").click();
-  await expect(page.locator("#import-trigger")).toBeVisible();
+  await expect(page.locator("#import-trigger")).toBeHidden();
+  await expect(page.locator("#owner-setup-tools")).toBeHidden();
+  await expect(page.locator("#personal-library")).toBeHidden();
+  await expect(page.locator("#feed-feature")).toContainText("发现同好");
   await expect(page.locator("#discover-from-hero")).toBeVisible();
   await expect(page.locator(".hero-cinematic")).toBeVisible();
   const filterCount=await page.locator("#feed-channels button").count();
