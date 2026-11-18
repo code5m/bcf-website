@@ -940,11 +940,8 @@ function renderBrowserosPreview(){
     (v.metadataMissing?" · 缺少真实标题":"")+'</small></span></label>').join(""):
     '<p class="small-copy">没有符合条件的收藏，尝试清空筛选。</p>';
 }
-async function previewBrowserosFile(file){
-  if(!file)return;
-  if(file.size>20_000_000)throw Error("文件超过 20MB 限制，请拆分原始备份");
-  const raw=await file.text();
-  const result=inspectBrowserosImport(file.name,raw);
+function previewBrowserosPayload(filename,raw){
+  const result=inspectBrowserosImport(filename,raw);
   importPreview=result;
   importSelected.clear();
   for(const item of result.items)importSelected.add(item.bvid);
@@ -953,6 +950,11 @@ async function previewBrowserosFile(file){
   $("browseros-preview-missing").checked=false;
   $("browseros-preview-dialog").showModal();
   renderBrowserosPreview();
+}
+async function previewBrowserosFile(file){
+  if(!file)return;
+  if(file.size>20_000_000)throw Error("文件超过 20MB 限制，请拆分原始备份");
+  previewBrowserosPayload(file.name,await file.text());
 }
 function wireBrowserosPreview(){
   const choose=()=>$("browseros-preview-file").click();
@@ -1041,7 +1043,7 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
-    if(action==="import"){$("import-file").click();return;}
+    if(action==="import"){$("browseros-preview-file").click();return;}
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
@@ -1223,7 +1225,8 @@ function wire() {
         headers:{"X-Tongpin-Request":"1","Origin":location.origin},cache:"no-store"});
       const data=await res.json();
       if(!res.ok)throw Error(data.detail ? "本机 BFC 不可用："+data.detail : "请启动本机 BFC 工作台服务（默认4198）。");
-      await importPayload(data);
+      // Even owner-authorized loopback backups should be previewed before import.
+      previewBrowserosPayload("browseros-bfc-backup.json",JSON.stringify(data));
     }catch(e){notify(e.message,true);}
     finally{button.disabled=false;}
   };
