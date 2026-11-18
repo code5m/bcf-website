@@ -61,7 +61,7 @@
       <details class="manage-drawer"><summary>视频备份与本机 BFC 导入 <span>管理我的收藏 ›</span></summary>
         <div class="manage-content">
           <p class="local-bridge-status" id="local-bridge-status">数据只存于当前浏览器。可以手动导入本机 BFC 收藏，不会自动扫描 B站。</p>
-          <div class="hero-actions"><button class="button button-soft" id="import-bfc-local">从本机 BFC 导入</button><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
+          <div class="hero-actions"><button class="button button-soft" id="import-bfc-local">从本机 BFC 导入</button><button class="button button-soft" id="import-browseros-preview">预览 BrowserOS/BFC 导出文件</button><button class="button button-soft" id="export-trigger">导出私人备份</button><button class="button button-soft" id="undo-import">撤销上次导入</button></div>
         </div>
       </details>
       <div class="section-heading"><div><h3>我的片单</h3><p>在 B站观看原视频；私人收藏默认不公开。</p></div><div class="playlist-actions"><button class="button button-soft" id="library-sharing">管理精选 <span id="draft-indicator" hidden></span></button><button class="button button-soft" id="add-trigger">＋ 添加</button></div></div>
@@ -169,6 +169,21 @@
   </main>
 </div>
 <input id="import-file" type="file" accept="application/json,.json" hidden>
+<input id="browseros-preview-file" type="file" accept=".json,.html,.htm,application/json,text/html" hidden>
+<dialog id="browseros-preview-dialog" class="modal browseros-preview-dialog" aria-labelledby="browseros-preview-title">
+  <h3 id="browseros-preview-title">导入前先看看你的真实收藏</h3>
+  <p class="small-copy">仅在当前设备解析。不会上传原始文件、收藏 BV、私人笔记，也不会自动公开精选。</p>
+  <p id="browseros-preview-summary" class="browseros-preview-summary" role="status"></p>
+  <div class="browseros-preview-toolbar">
+    <input type="search" id="browseros-preview-search" placeholder="搜索 BV 号、标题、UP主…" aria-label="搜索待导入的收藏">
+    <select id="browseros-preview-folders" aria-label="筛选来源收藏夹"><option value="">全部收藏夹</option></select>
+  </div>
+  <label class="browseros-preview-missing"><input id="browseros-preview-missing" type="checkbox"> 只看缺少真实标题的视频</label>
+  <div class="browseros-preview-toolbar"><button type="button" id="browseros-preview-select" class="button button-soft">勾选当前筛选</button><button type="button" id="browseros-preview-clear" class="button button-ghost">清空勾选</button><span id="browseros-preview-selected"></span></div>
+  <div id="browseros-preview-list" class="browseros-preview-list" aria-label="待导入私人视频列表"></div>
+  <div class="browseros-preview-toolbar browseros-preview-pager"><button type="button" id="browseros-preview-prev" class="button button-soft">上一页</button><span id="browseros-preview-page"></span><button type="button" id="browseros-preview-next" class="button button-soft">下一页</button></div>
+  <div class="modal-actions"><button type="button" id="browseros-preview-cancel" class="button button-ghost">取消</button><button type="button" id="browseros-preview-confirm" class="button button-primary">导入选中的私人收藏</button></div>
+</dialog>
 <dialog id="add-dialog" class="modal"><form id="add-form" class="stacked-form"><h3>添加私人视频</h3><label>BV号或 B站视频链接<input name="bvid" required placeholder="BVxxxxxxxxxx"></label><label>标题<input name="title" maxlength="150" required></label><label>标签（逗号分隔）<input name="tags" placeholder="AI, 教程"></label><label>私人笔记<textarea name="notes" rows="4" maxlength="4000"></textarea></label><div class="modal-actions"><button type="button" class="button button-ghost" id="cancel-add">取消</button><button class="button button-primary">保存到本地</button></div></form></dialog>
 <dialog id="study-dialog" class="modal"><form id="study-form" class="stacked-form">
   <h3 id="study-dialog-title">邀请好友一起学习</h3>

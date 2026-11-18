@@ -1,4 +1,5 @@
 import {bvidOf, cleanTopics, normalizeImported, matchLocalFavorites, MAX_SHOWCASE} from "./core.js";
+import {inspectBrowserosImport} from "./browseros-import.js";
 
 const $ = id => document.getElementById(id);
 let contestMounted=false,liveAppInitialized=false,contestCleanup=null;
@@ -898,6 +899,106 @@ async function persistVideo(input) {
   }]);
   await refreshLocal();
 }
+
+/* All previews and filtering happen in the current browser. No private upload. */
+let importPreview=null,importPreviewPage=0,importPreviewFolder="",importPreviewMissingOnly=false;
+const importSelected=new Set();
+const importEscape=escapeHtml;
+function previewFiltered(){
+  if(!importPreview)return [];
+  const q=$("browseros-preview-search").value.trim().toLowerCase();
+  return importPreview.items.filter(v=>
+    (!importPreviewFolder||(v.sourceFolders||[]).includes(importPreviewFolder)) &&
+    (!importPreviewMissingOnly||v.metadataMissing) &&
+    (!q||[v.title,v.bvid,v.author,...(v.tags||[]),...(v.sourceFolders||[])].join(" ").toLowerCase().includes(q)));
+}
+function renderBrowserosPreview(){
+  if(!importPreview)return;
+  $("browseros-preview-summary").textContent=
+    importPreview.items.length+" 条去重 BV 视频 · 缺标题 "+importPreview.missing+
+    " 条 · 重复 "+importPreview.duplicates+" 条 · 无效 "+importPreview.rejected+
+    " 条 · 原专题 "+importPreview.topics.length+" 个";
+  $("browseros-preview-selected").textContent="已选择 "+importSelected.size+" 条";
+  const folders=$("browseros-preview-folders"),chosen=importPreviewFolder;
+  folders.replaceChildren(new Option("全部收藏夹",""));
+  for(const [folder,count] of importPreview.folderCounts.slice(0,150))
+    folders.add(new Option(folder+" ("+count+")",folder));
+  folders.value=chosen;
+  const items=previewFiltered(),size=40,maxPage=Math.max(1,Math.ceil(items.length/size));
+  importPreviewPage=Math.min(Math.max(importPreviewPage,0),maxPage-1);
+  $("browseros-preview-page").textContent="第 "+(importPreviewPage+1)+" / "+maxPage+" 页 · 符合筛选 "+items.length+" 条";
+  $("browseros-preview-prev").disabled=importPreviewPage===0;
+  $("browseros-preview-next").disabled=importPreviewPage===maxPage-1;
+  $("browseros-preview-confirm").disabled=importSelected.size===0;
+  const slice=items.slice(importPreviewPage*size,(importPreviewPage+1)*size);
+  $("browseros-preview-list").innerHTML=slice.length?slice.map(v=>
+    '<label class="browseros-preview-video"><input type="checkbox" data-import-bvid="'+
+    importEscape(v.bvid)+'" '+(importSelected.has(v.bvid)?"checked":"")+'>'+
+    '<span class="browseros-preview-video-info"><strong>'+importEscape(v.title)+'</strong>'+
+    '<small>'+importEscape(v.bvid)+(v.author?' · '+importEscape(v.author):"")+'</small>'+
+    '<small>'+importEscape((v.sourceFolders||[]).join(" / ")||"未分类")+
+    (v.metadataMissing?" · 缺少真实标题":"")+'</small></span></label>').join(""):
+    '<p class="small-copy">没有符合条件的收藏，尝试清空筛选。</p>';
+}
+async function previewBrowserosFile(file){
+  if(!file)return;
+  if(file.size>20_000_000)throw Error("文件超过 20MB 限制，请拆分原始备份");
+  const raw=await file.text();
+  const result=inspectBrowserosImport(file.name,raw);
+  importPreview=result;
+  importSelected.clear();
+  for(const item of result.items)importSelected.add(item.bvid);
+  importPreviewPage=0;importPreviewFolder="";importPreviewMissingOnly=false;
+  $("browseros-preview-search").value="";
+  $("browseros-preview-missing").checked=false;
+  $("browseros-preview-dialog").showModal();
+  renderBrowserosPreview();
+}
+function wireBrowserosPreview(){
+  const choose=()=>$("browseros-preview-file").click();
+  $("import-trigger").onclick=choose;
+  $("import-browseros-preview").onclick=choose;
+  $("browseros-preview-file").onchange=async e=>{
+    try{const file=e.target.files?.[0];if(file)await previewBrowserosFile(file);}
+    catch(error){notify("无法预览收藏："+error.message,true);}
+    e.target.value="";
+  };
+  $("browseros-preview-cancel").onclick=()=>$("browseros-preview-dialog").close();
+  $("browseros-preview-search").oninput=()=>{importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-folders").onchange=e=>{importPreviewFolder=e.target.value;importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-missing").onchange=e=>{importPreviewMissingOnly=e.target.checked;importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-prev").onclick=()=>{importPreviewPage--;renderBrowserosPreview();};
+  $("browseros-preview-next").onclick=()=>{importPreviewPage++;renderBrowserosPreview();};
+  $("browseros-preview-select").onclick=()=>{
+    for(const item of previewFiltered())importSelected.add(item.bvid);
+    renderBrowserosPreview();
+  };
+  $("browseros-preview-clear").onclick=()=>{importSelected.clear();renderBrowserosPreview();};
+  $("browseros-preview-list").onchange=e=>{
+    const checkbox=e.target.closest("input[data-import-bvid]");
+    if(!checkbox)return;
+    if(checkbox.checked)importSelected.add(checkbox.dataset.importBvid);
+    else importSelected.delete(checkbox.dataset.importBvid);
+    $("browseros-preview-selected").textContent="已选择 "+importSelected.size+" 条";
+    $("browseros-preview-confirm").disabled=importSelected.size===0;
+  };
+  $("browseros-preview-confirm").onclick=async()=>{
+    if(!importPreview||!importSelected.size)return;
+    const selected=importPreview.items.filter(item=>importSelected.has(item.bvid));
+    const selectedIds=new Set(selected.map(item=>item.bvid));
+    const topics=importPreview.topics.map(t=>({...t,items:t.items.filter(id=>selectedIds.has(id))}))
+      .filter(t=>t.items.length>0);
+    // No server/API call. Existing atomic import keeps a one-step undo snapshot.
+    const button=$("browseros-preview-confirm");
+    button.disabled=true;
+    try{
+      await importPayload({type:"tongpin_private_library",version:3,videos:selected,topics});
+      $("browseros-preview-dialog").close();
+    }catch(e){notify("私人导入失败："+e.message,true);}
+    finally{button.disabled=false;importPreview=null;importSelected.clear();}
+  };
+}
+
 async function importFile(file) {
   if (file.size>20_000_000) throw new Error("导入文件超过 20MB 限制");
   await importPayload(JSON.parse(await file.text()));
@@ -1077,6 +1178,7 @@ async function actionHandler(event) {
   }catch(e){notify(e.message,true);}
 }
 function wire() {
+  wireBrowserosPreview();
   $("contest-demo-top").onclick=showContestDemo;
   $("contest-demo-hero").onclick=showContestDemo;
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
@@ -1111,7 +1213,7 @@ function wire() {
       $("chat-text").focus();
     };
   });
-  $("import-trigger").onclick=()=>$("import-file").click();
+  // BrowserOS import button is wired to previewBrowserosFile in wireBrowserosPreview.
   $("import-bfc-local").onclick=async()=>{
     const button=$("import-bfc-local");
     if(!confirm("从本机 127.0.0.1:4198 读取你已有的 BFC 收藏备份并导入当前浏览器？不会访问 B站，也不会上传到社交服务。"))return;

@@ -880,3 +880,22 @@ body{background:#101116}
 @media(prefers-reduced-motion:reduce){
   .tpd-app *{scroll-behavior:auto!important;transition:none!important;animation:none!important}
 }
+
+
+/* BrowserOS user-selected backup preview. Entirely local, no network calls. */
+.browseros-preview-dialog{width:min(850px,calc(100% - 22px));max-width:850px;max-height:min(90vh,850px);overflow:auto;padding:22px}
+.browseros-preview-dialog h3{margin:0 0 7px;font-size:23px}
+.browseros-preview-summary{padding:11px 14px;border:1px solid #5a5266;background:#25202e;border-radius:12px;font-size:13px}
+.browseros-preview-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:12px 0}
+.browseros-preview-toolbar input,.browseros-preview-toolbar select{min-width:0;background:#14121b;color:#fff;border:1px solid #58455f;border-radius:10px;padding:10px;min-height:42px}
+.browseros-preview-toolbar input{flex:1 1 215px}.browseros-preview-toolbar select{flex:1 1 160px}
+.browseros-preview-missing{display:flex;align-items:center;gap:8px;font-size:12px;color:#decbd9}
+.browseros-preview-list{display:grid;gap:8px;max-height:40vh;overflow:auto;overscroll-behavior:contain}
+.browseros-preview-video{display:flex;align-items:flex-start;gap:11px;padding:12px;border:1px solid #443d4d;background:#24202b;border-radius:12px}
+.browseros-preview-video>input{width:17px;height:17px;flex:0 0 17px;margin-top:5px;accent-color:#f8a8cd}
+.browseros-preview-video-info{min-width:0;display:grid;gap:3px}
+.browseros-preview-video-info strong{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.browseros-preview-video-info small{font-size:11px;color:#b5b2c4;overflow-wrap:anywhere}
+.browseros-preview-pager{justify-content:space-between}
+#browseros-preview-selected,#browseros-preview-page{font-size:12px;color:#c6b9c9}
+@media(max-width:600px){.browseros-preview-dialog{padding:15px;max-height:88vh}.browseros-preview-dialog .modal-actions{flex-wrap:wrap}.browseros-preview-dialog .modal-actions button{flex:1 1 170px}}
