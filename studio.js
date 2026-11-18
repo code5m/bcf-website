@@ -107,6 +107,9 @@ $('export').onclick=()=>{
   // The user's live local changes win, while server-only notes/progress survive.
   const saved=server.library||{};
   const library={...saved,...state,
+    topics:state.topics?.length?state.topics:(saved.topics||[]),
+    categories:{...(saved.categories||{}),...(state.categories||{})},
+    watched:{...(saved.watched||{}),...(state.watched||{})},
     notes:{...(saved.notes||{}),...(state.notes||{})},
     progress:{...(saved.progress||{}),...(state.progress||{})}};
   const archive=fullBfcBackup(server.videos,library);
@@ -152,4 +155,4 @@ fetch('/api/session',{headers:{'X-Tongpin-Local':'1'}}).then(r=>{if(!r.ok)throw 
  }
  menus();refreshCategoryTopics(state,rows);save();navigate();updateOverview();
  return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
-}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198）。没有加载虚构视频；请前往「同频」选择本机导入或手动 JSON 导入。';navigate();});
+}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198），无法导出完整收藏。请先确认原服务有视频记录。';navigate();});

@@ -6,7 +6,7 @@ export function fullBfcBackup(videos,library,{date=new Date()}={}){
   const source=dict(videos),records={};
   for(const [key,value] of Object.entries(source)){
     const entry=dict(value);
-    const id=entry.bvid||key;
+    const id=bvid.test(entry.bvid)?entry.bvid:key;
     if(bvid.test(id))records[id]={...entry,bvid:id};
   }
   const count=Object.keys(records).length;
