@@ -25,7 +25,7 @@ const rootAssets=new Set([
   "studio.html","studio.css","studio.js","index.html","app.js","style.css",
   "navigation.js","library-state.js","local-library.js","topic-recipes.js",
   "monitor.js","progress-report.js","evidence-review.js","full-review.js",
-  "expanded-triage.js","historical-gaps.js","readback-tool.js","saved-page-import.js",
+  "expanded-triage.js","historical-gaps.js","readback-tool.js","full-bfc-backup.js","saved-page-import.js",
   "saved-page-parser.js"
 ]);
 const tongpinAssets=new Set([
