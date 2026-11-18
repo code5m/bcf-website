@@ -13,7 +13,7 @@ test("private favorite matches a different user's opt-in public video without up
   const commonBV="BV"+unique.padStart(10,"0");
   const privateOnlyBV="BV"+(unique+"z").slice(0,10).padStart(10,"0");
   try{
-    await b.goto("/tongpin/");
+    await b.goto("/tongpin/?setup=1");
     await b.locator("#add-trigger").click();
     await b.locator('#add-form [name="bvid"]').fill(commonBV);
     await b.locator('#add-form [name="title"]').fill("公开的共同视频");
@@ -33,7 +33,7 @@ test("private favorite matches a different user's opt-in public video without up
     await b.locator('#profile-form [name="discoverable"]').check();
     await b.locator('#profile-form .button-primary').click();
 
-    await a.goto("/tongpin/");
+    await a.goto("/tongpin/?setup=1");
     await a.locator("#import-file").setInputFiles({
       name:"private-backup.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify({type:"tongpin_private_library",version:3,
@@ -78,7 +78,7 @@ test("private favorite matches a different user's opt-in public video without up
 
 test("private-only collections do not create a false remote discovery match",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const secretOnly="BV"+Date.now().toString(36).slice(-8).padStart(10,"Z");
   await page.locator("#import-file").setInputFiles({
     name:"private.json",mimeType:"application/json",

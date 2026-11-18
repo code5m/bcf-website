@@ -1,6 +1,13 @@
 import {bvidOf, cleanTopics, normalizeImported, matchLocalFavorites, MAX_SHOWCASE} from "./core.js";
+import {inspectBrowserosImport} from "./browseros-import.js";
 
 const $ = id => document.getElementById(id);
+const ownerSetupMode=new URLSearchParams(location.search).get("setup")==="1";
+function configureOwnerSetup(){
+  for(const id of ["import-trigger","add-trigger","owner-setup-tools","legacy-workbench-link","owner-setup-badge"]){
+    const el=$(id);if(el)el.hidden=!ownerSetupMode;
+  }
+}
 let contestMounted=false,liveAppInitialized=false,contestCleanup=null;
 async function showContestDemo(){
   if(contestMounted)return;
@@ -301,14 +308,14 @@ function renderFeed(){
   const filtered=state.feedTag?state.items.filter(item=>(item.tags||[]).includes(state.feedTag)):state.items;
   $("feed-status").textContent=state.items.length?
     filtered.length+" 条私人视频 · 在 B站观看"+(state.feedTag?" · #"+state.feedTag:""):
-    "导入私人片单，或看看大家公开分享的视频。";
+    "看看大家主动公开的视频，发现共同喜欢的内容。";
   const item=filtered[0];
   if(!item){
     $("feed-feature").innerHTML='<div class="spotlight-empty"><span class="spotlight-spark" aria-hidden="true">▶</span>'+
-      '<div><span class="overline">MAKE IT YOURS</span><h4>第一条视频，等你带进来。</h4>'+
-      '<p>把 BFC 收藏或 JSON 片单导入，就能从海报式视频卡片开始浏览。也可以先遇见已经主动分享内容的真实用户。</p>'+
-      '<div class="spotlight-buttons"><button data-action="import" class="button button-primary">导入视频</button>'+
-      '<button data-action="discover" class="button button-soft">去遇见同好</button></div></div></div>';
+      '<div><span class="overline">DISCOVER TOGETHER</span><h4>从喜欢的内容，遇见同频的人。</h4>'+
+      '<p>这里展示真实用户主动公开的精选；还没有真实内容时，可以先体验明确标注的互动演示。</p>'+
+      '<div class="spotlight-buttons"><button data-action="discover" class="button button-primary">发现同好 →</button>'+
+      '<button data-action="try-demo" class="button button-soft">体验 APP 演示</button></div></div></div>';
     return;
   }
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
@@ -337,8 +344,8 @@ function renderCommunityFeed(){
   }
   if(!state.communityFeed.length){
     target.innerHTML='<div class="community-empty"><strong>还没有人公开分享视频。</strong>'+
-      '<p>这里不会放虚构视频充数。你可以从自己的真实收藏里选择几条，成为首批分享者。</p>'+
-      '<button class="button button-primary" data-action="showcase">去整理我的精选 →</button></div>';
+      '<p>真实用户尚未主动公开内容。正式视频流不会用虚构视频冒充真实分享。</p>'+
+      '<button class="button button-soft" data-action="try-demo">体验模拟交友流程 →</button></div>';
     return;
   }
   const localIds=new Set(state.items.map(video=>video.bvid));
@@ -427,6 +434,7 @@ function renderLibraryList(){
   $("page-next").disabled=state.page>=pages;
 }
 function renderLocal(){
+  $("personal-library").hidden=!ownerSetupMode && !state.items.length;
   $("stat-count").textContent=state.items.length.toLocaleString("zh-CN");
   $("stat-topics").textContent=new Set(state.items.flatMap(i=>i.tags||[])).size.toLocaleString("zh-CN");
   $("stat-shared").textContent=state.user?.showcase?.length||0;
@@ -898,6 +906,108 @@ async function persistVideo(input) {
   }]);
   await refreshLocal();
 }
+
+/* All previews and filtering happen in the current browser. No private upload. */
+let importPreview=null,importPreviewPage=0,importPreviewFolder="",importPreviewMissingOnly=false;
+const importSelected=new Set();
+const importEscape=escapeHtml;
+function previewFiltered(){
+  if(!importPreview)return [];
+  const q=$("browseros-preview-search").value.trim().toLowerCase();
+  return importPreview.items.filter(v=>
+    (!importPreviewFolder||(v.sourceFolders||[]).includes(importPreviewFolder)) &&
+    (!importPreviewMissingOnly||v.metadataMissing) &&
+    (!q||[v.title,v.bvid,v.author,...(v.tags||[]),...(v.sourceFolders||[])].join(" ").toLowerCase().includes(q)));
+}
+function renderBrowserosPreview(){
+  if(!importPreview)return;
+  $("browseros-preview-summary").textContent=
+    importPreview.items.length+" 条去重 BV 视频 · 缺标题 "+importPreview.missing+
+    " 条 · 重复 "+importPreview.duplicates+" 条 · 无效 "+importPreview.rejected+
+    " 条 · 原专题 "+importPreview.topics.length+" 个";
+  $("browseros-preview-selected").textContent="已选择 "+importSelected.size+" 条";
+  const folders=$("browseros-preview-folders"),chosen=importPreviewFolder;
+  folders.replaceChildren(new Option("全部收藏夹",""));
+  for(const [folder,count] of importPreview.folderCounts.slice(0,150))
+    folders.add(new Option(folder+" ("+count+")",folder));
+  folders.value=chosen;
+  const items=previewFiltered(),size=40,maxPage=Math.max(1,Math.ceil(items.length/size));
+  importPreviewPage=Math.min(Math.max(importPreviewPage,0),maxPage-1);
+  $("browseros-preview-page").textContent="第 "+(importPreviewPage+1)+" / "+maxPage+" 页 · 符合筛选 "+items.length+" 条";
+  $("browseros-preview-prev").disabled=importPreviewPage===0;
+  $("browseros-preview-next").disabled=importPreviewPage===maxPage-1;
+  $("browseros-preview-confirm").disabled=importSelected.size===0;
+  const slice=items.slice(importPreviewPage*size,(importPreviewPage+1)*size);
+  $("browseros-preview-list").innerHTML=slice.length?slice.map(v=>
+    '<label class="browseros-preview-video"><input type="checkbox" data-import-bvid="'+
+    importEscape(v.bvid)+'" '+(importSelected.has(v.bvid)?"checked":"")+'>'+
+    '<span class="browseros-preview-video-info"><strong>'+importEscape(v.title)+'</strong>'+
+    '<small>'+importEscape(v.bvid)+(v.author?' · '+importEscape(v.author):"")+'</small>'+
+    '<small>'+importEscape((v.sourceFolders||[]).join(" / ")||"未分类")+
+    (v.metadataMissing?" · 缺少真实标题":"")+'</small></span></label>').join(""):
+    '<p class="small-copy">没有符合条件的收藏，尝试清空筛选。</p>';
+}
+function previewBrowserosPayload(filename,raw){
+  const result=inspectBrowserosImport(filename,raw);
+  importPreview=result;
+  importSelected.clear();
+  for(const item of result.items)importSelected.add(item.bvid);
+  importPreviewPage=0;importPreviewFolder="";importPreviewMissingOnly=false;
+  $("browseros-preview-search").value="";
+  $("browseros-preview-missing").checked=false;
+  $("browseros-preview-dialog").showModal();
+  renderBrowserosPreview();
+}
+async function previewBrowserosFile(file){
+  if(!file)return;
+  if(file.size>20_000_000)throw Error("文件超过 20MB 限制，请拆分原始备份");
+  previewBrowserosPayload(file.name,await file.text());
+}
+function wireBrowserosPreview(){
+  const choose=()=>$("browseros-preview-file").click();
+  $("import-trigger").onclick=choose;
+  $("import-browseros-preview").onclick=choose;
+  $("browseros-preview-file").onchange=async e=>{
+    try{const file=e.target.files?.[0];if(file)await previewBrowserosFile(file);}
+    catch(error){notify("无法预览收藏："+error.message,true);}
+    e.target.value="";
+  };
+  $("browseros-preview-cancel").onclick=()=>$("browseros-preview-dialog").close();
+  $("browseros-preview-search").oninput=()=>{importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-folders").onchange=e=>{importPreviewFolder=e.target.value;importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-missing").onchange=e=>{importPreviewMissingOnly=e.target.checked;importPreviewPage=0;renderBrowserosPreview();};
+  $("browseros-preview-prev").onclick=()=>{importPreviewPage--;renderBrowserosPreview();};
+  $("browseros-preview-next").onclick=()=>{importPreviewPage++;renderBrowserosPreview();};
+  $("browseros-preview-select").onclick=()=>{
+    for(const item of previewFiltered())importSelected.add(item.bvid);
+    renderBrowserosPreview();
+  };
+  $("browseros-preview-clear").onclick=()=>{importSelected.clear();renderBrowserosPreview();};
+  $("browseros-preview-list").onchange=e=>{
+    const checkbox=e.target.closest("input[data-import-bvid]");
+    if(!checkbox)return;
+    if(checkbox.checked)importSelected.add(checkbox.dataset.importBvid);
+    else importSelected.delete(checkbox.dataset.importBvid);
+    $("browseros-preview-selected").textContent="已选择 "+importSelected.size+" 条";
+    $("browseros-preview-confirm").disabled=importSelected.size===0;
+  };
+  $("browseros-preview-confirm").onclick=async()=>{
+    if(!importPreview||!importSelected.size)return;
+    const selected=importPreview.items.filter(item=>importSelected.has(item.bvid));
+    const selectedIds=new Set(selected.map(item=>item.bvid));
+    const topics=importPreview.topics.map(t=>({...t,items:t.items.filter(id=>selectedIds.has(id))}))
+      .filter(t=>t.items.length>0);
+    // No server/API call. Existing atomic import keeps a one-step undo snapshot.
+    const button=$("browseros-preview-confirm");
+    button.disabled=true;
+    try{
+      await importPayload({type:"tongpin_private_library",version:3,videos:selected,topics});
+      $("browseros-preview-dialog").close();
+    }catch(e){notify("私人导入失败："+e.message,true);}
+    finally{button.disabled=false;importPreview=null;importSelected.clear();}
+  };
+}
+
 async function importFile(file) {
   if (file.size>20_000_000) throw new Error("导入文件超过 20MB 限制");
   await importPayload(JSON.parse(await file.text()));
@@ -940,7 +1050,8 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
-    if(action==="import"){$("import-file").click();return;}
+    if(action==="try-demo"){showContestDemo();return;}
+    if(action==="import"){if(ownerSetupMode)$("browseros-preview-file").click();return;}
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
     if(action==="login"){setTab("account");return;}
@@ -1077,6 +1188,8 @@ async function actionHandler(event) {
   }catch(e){notify(e.message,true);}
 }
 function wire() {
+  configureOwnerSetup();
+  wireBrowserosPreview();
   $("contest-demo-top").onclick=showContestDemo;
   $("contest-demo-hero").onclick=showContestDemo;
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
@@ -1111,7 +1224,7 @@ function wire() {
       $("chat-text").focus();
     };
   });
-  $("import-trigger").onclick=()=>$("import-file").click();
+  // BrowserOS import button is wired to previewBrowserosFile in wireBrowserosPreview.
   $("import-bfc-local").onclick=async()=>{
     const button=$("import-bfc-local");
     if(!confirm("从本机 127.0.0.1:4198 读取你已有的 BFC 收藏备份并导入当前浏览器？不会访问 B站，也不会上传到社交服务。"))return;
@@ -1121,7 +1234,8 @@ function wire() {
         headers:{"X-Tongpin-Request":"1","Origin":location.origin},cache:"no-store"});
       const data=await res.json();
       if(!res.ok)throw Error(data.detail ? "本机 BFC 不可用："+data.detail : "请启动本机 BFC 工作台服务（默认4198）。");
-      await importPayload(data);
+      // Even owner-authorized loopback backups should be previewed before import.
+      previewBrowserosPayload("browseros-bfc-backup.json",JSON.stringify(data));
     }catch(e){notify(e.message,true);}
     finally{button.disabled=false;}
   };
@@ -1130,6 +1244,7 @@ function wire() {
     $("local-bridge-status").textContent="当前是远程或移动端模式：请选择本地 JSON 备份手动导入，绝不远程访问你的 BFC 私人服务。";
   }
   $("export-trigger").onclick=exportLocal;
+  $("export-private-account").onclick=exportLocal;
   $("undo-import").onclick=async()=>{
     if(!confirm("恢复到上一次导入前的本地收藏快照？导入之后新增的本地修改会一并撤销。"))return;
     try{await restoreLastImport();await refreshLocal();notify("已恢复到上次导入之前。");}

@@ -25,11 +25,11 @@ const rootAssets=new Set([
   "studio.html","studio.css","studio.js","index.html","app.js","style.css",
   "navigation.js","library-state.js","local-library.js","topic-recipes.js",
   "monitor.js","progress-report.js","evidence-review.js","full-review.js",
-  "expanded-triage.js","historical-gaps.js","readback-tool.js","saved-page-import.js",
+  "expanded-triage.js","historical-gaps.js","readback-tool.js","full-bfc-backup.js","saved-page-import.js",
   "saved-page-parser.js"
 ]);
 const tongpinAssets=new Set([
-  "index.html","app.js","app.css","core.js","demo.js","sw.js","manifest.webmanifest","icon.svg",
+  "index.html","app.js","app.css","core.js","browseros-import.js","demo.js","sw.js","manifest.webmanifest","icon.svg",
   "terms.html","admin.html","admin.js"
 ]);
 const securityHeaders={

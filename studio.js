@@ -1,4 +1,5 @@
 import {buildStarterTopics} from './topic-recipes.js';
+import {fullBfcBackup} from './full-bfc-backup.js';
 import {validateLibraryState,nextVideo,followingVideo,addToTopic,moveVideo,refreshCategoryTopics} from './library-state.js';
 const $=id=>document.getElementById(id),key='self-curated-library-v1';
 let data,rows=[],page=1,selected=new Set(),active=null,editing=null,sessionToken=null,syncTimer=null,serverRevision=null,displayMode=localStorage.getItem('bfc-view-mode')||'preview';
@@ -99,12 +100,35 @@ function edit(t=null){editing=t?.id||null;$('topic-name').value=t?.name||'';$('t
 $('new-topic').onclick=()=>edit();$('edit-topic').onclick=()=>edit(state.topics.find(t=>t.id===active));$('close-dialog').onclick=()=>$('topic-dialog').close();$('topic-form').onsubmit=e=>{e.preventDefault();const name=$('topic-name').value.trim();if(!name)return;const t=state.topics.find(t=>t.id===editing)||{id:crypto.randomUUID(),items:[],sections:{}};t.name=name;t.description=$('topic-description').value.trim();t.notes=$('topic-notes').value.trim();t.chapters=[...new Set($('topic-chapters').value.split('\n').map(x=>x.trim()).filter(Boolean))];if(!editing)state.topics.push(t);save();$('topic-dialog').close();navigate();};
 $('back').onclick=()=>location.hash='topics';$('find-videos').onclick=()=>{location.hash='library';};for(const id of ['search','filter','confidence'])$(id).oninput=()=>{page=1;library();};$('prev').onclick=()=>{page--;library();};$('next').onclick=()=>{page++;library();};$('select-page').onchange=e=>{for(const c of $('videos').querySelectorAll('input[type=checkbox]')){c.checked=e.target.checked;c.dispatchEvent(new Event('change'));}};
 $('add-selected').onclick=()=>{const t=state.topics.find(t=>t.id===$('assign-topic').value);if(!t){edit();return;}const before=t.items.length;if(selected.size)t.customized=true;addToTopic(t,[...selected]);save();$('message').textContent=`已将 ${t.items.length-before} 条新视频加入「${t.name}」，重复项自动跳过`;selected.clear();library();};$('recategorize').onclick=()=>{const c=$('assign-category').value;for(const id of selected)state.categories[id]=c;refreshCategoryTopics(state,rows);save();$('message').textContent=`已修改 ${selected.size} 条视频分类`;selected.clear();menus();library();};
-$('export').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'})),a=el('a','');a.href=u;a.download='my-video-library.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);};
+$('export').onclick=()=>{
+ try{
+  const server=data?.state;
+  if(!server?.videos)throw Error("尚未连接完整 BFC 视频库。");
+  // The user's live local changes win, while server-only notes/progress survive.
+  const saved=server.library||{};
+  const library={...saved,...state,
+    topics:state.topics?.length?state.topics:(saved.topics||[]),
+    categories:{...(saved.categories||{}),...(state.categories||{})},
+    watched:{...(saved.watched||{}),...(state.watched||{})},
+    notes:{...(saved.notes||{}),...(state.notes||{})},
+    progress:{...(saved.progress||{}),...(state.progress||{})}};
+  const archive=fullBfcBackup(server.videos,library);
+  const blob=new Blob([JSON.stringify(archive)],{type:'application/json'});
+  if(blob.size>20_000_000)throw Error("完整备份超过同频 20 MB 单文件限制，请先清理无关元数据。");
+  const u=URL.createObjectURL(blob),a=el('a','');
+  a.href=u;a.download='bfc-complete-collection-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();setTimeout(()=>URL.revokeObjectURL(u),10000);
+  $('message').textContent='已导出完整 BFC 收藏 '+Object.keys(archive.state.videos).length+
+    ' 条（视频记录 + 专题 + 私人笔记）。请通过浏览器下载记录查看保存位置。';
+ }catch(error){$('message').textContent=error.message;}
+};
 $('logout').onclick=async()=>{if(!sessionToken)return;const response=await fetch('/api/session/logout',{method:'POST',headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1','Origin':location.origin,'Content-Type':'application/json'},body:'{}'});if(response.ok){sessionToken=null;$('message').textContent='已退出当前会话，专题数据仍保留。';}};
 $('import').onchange=async e=>{
  if(!e.target.files.length)return;
  try{
-  const restored=validateLibraryState(JSON.parse(await e.target.files[0].text()),new Set(rows.map(r=>r.bvid)));
+  const file=JSON.parse(await e.target.files[0].text());
+  const restored=validateLibraryState(file?.type==="workbench_backup"?file.state?.library:file,
+    new Set(rows.map(r=>r.bvid)));
   localStorage.setItem(key,JSON.stringify(restored));
   state=restored;menus();navigate();$('message').textContent='已恢复备份';
  }catch(err){$('message').textContent=err.message;}
@@ -131,4 +155,4 @@ fetch('/api/session',{headers:{'X-Tongpin-Local':'1'}}).then(r=>{if(!r.ok)throw 
  }
  menus();refreshCategoryTopics(state,rows);save();navigate();updateOverview();
  return fetch('/api/workbench/state',{headers:{'X-Local-CSRF':sessionToken,'X-Tongpin-Local':'1'}}).then(r=>r.json()).then(server=>{serverRevision=server.summary.revision;return syncServer();});
-}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198）。没有加载虚构视频；请前往「同频」选择本机导入或手动 JSON 导入。';navigate();});
+}).catch(e=>{data={};rows=[];$('message').textContent='当前未连接原 BFC 工作台后端（默认 127.0.0.1:4198），无法导出完整收藏。请先确认原服务有视频记录。';navigate();});

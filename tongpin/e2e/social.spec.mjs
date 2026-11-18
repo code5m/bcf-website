@@ -16,7 +16,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
   b.on("dialog", dialog=>dialog.accept());
   const suffix=Date.now().toString(36);
   async function addPrivate(page,tag) {
-    await page.goto("/tongpin/");
+    await page.goto("/tongpin/?setup=1");
     await page.locator("#add-trigger").click();
     await page.locator('#add-form [name="bvid"]').fill("BV1234567890");
     await page.locator('#add-form [name="title"]').fill("AI 电影制作入门");
@@ -115,7 +115,7 @@ test("private library, opt-in share, real matching, mutual consent and messaging
 });
 
 test("visitor can use private library without registering and sees no fabricated peers",async({page})=>{
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   await expect(page.locator("#stat-count")).toHaveText("0");
   await page.locator("[data-tab=discover]").click();
   await expect(page.locator("#discover-list")).toContainText("暂未发现相同收藏");
@@ -126,7 +126,7 @@ test("visitor can use private library without registering and sees no fabricated
 
 test("BFC JSON imports topics, restores learning progress, and exports private backup",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const payload={type:"workbench_backup",state:{
     videos:{"BV1234567890":{bvid:"BV1234567890",title:"电影后期入门",author:"创作者"}},
     library:{topics:[{id:"film",name:"电影实践",items:["BV1234567890"]}],
@@ -150,7 +150,7 @@ test("BFC JSON imports topics, restores learning progress, and exports private b
   expect(download.suggestedFilename()).toContain("tongpin-private-backup-");
 });
 test("private sharing draft can be reverted without exposing private note",async({page})=>{
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   await page.locator("#add-trigger").click();
   await page.locator('#add-form [name="bvid"]').fill("BV1234567890");
   await page.locator('#add-form [name="title"]').fill("个人私密收藏");
@@ -166,7 +166,7 @@ test("private sharing draft can be reverted without exposing private note",async
 
 test("two BFC imports preserve existing topic notes and offer atomic undo",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const first={type:"workbench_backup",state:{
     videos:{"BV1234567890":{bvid:"BV1234567890",title:"第一段课程"}},
     library:{topics:[{name:"电影专题",notes:"我原来的专属学习笔记",
@@ -199,7 +199,7 @@ test("two BFC imports preserve existing topic notes and offer atomic undo",async
 
 test("switching social accounts does not retain the old account's visible profile",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const make=async(name)=>{
     await page.locator("[data-tab=account]").click();
     await page.locator('#auth-form [name="handle"]').fill(name);
@@ -224,7 +224,7 @@ test("switching social accounts does not retain the old account's visible profil
 
 test("delete after importing cannot resurrect a private note through import undo",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const upload=async(payload)=>page.locator("#import-file").setInputFiles({
     name:"private.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(payload))
   });
@@ -248,7 +248,7 @@ test("delete after importing cannot resurrect a private note through import undo
 
 test("manual correction of placeholder title survives subsequent import",async({page})=>{
   page.on("dialog",dialog=>dialog.accept());
-  await page.goto("/tongpin/");
+  await page.goto("/tongpin/?setup=1");
   const oldBackup={type:"workbench_backup",state:{
     library:{notes:{"BV1234567890":"原本没有标题的私密笔记"}}
   }};
