@@ -27,7 +27,7 @@ function video(r,playlistIndex=null){
   if(playlistIndex===null){check.checked?selected.add(r.bvid):selected.delete(r.bvid);$('selection-count').textContent=`已选 ${selected.size} 条`;}
   else{state.watched[r.bvid]=check.checked;save();detail();}
  };
- box.append(check);if(displayMode==='preview'&&playlistIndex===null){const cover=document.createElement('img');cover.className='video-cover';cover.loading='lazy';cover.alt='';cover.src=r.pic||`https://images.weserv.nl/?url=i0.hdslb.com/bfs/archive/${r.bvid}.jpg`;cover.onerror=()=>{cover.removeAttribute('src');cover.classList.add('cover-fallback');};box.append(cover);}const info=el('div','','info'),a=el('a',r.title);
+ box.append(check);if(displayMode!=='titles'&&playlistIndex===null){const media=el('div','','video-media'),fallback=el('div','','cover-placeholder');fallback.append(el('span',category(r)||'自选'),el('strong',r.title),el('span','精选收藏 · BILIBILI'));media.append(fallback);const source=r.pic||r.cover||r.thumbnail||r.raw?.pic;if(source&&/^https?:\/\//.test(source)){const cover=document.createElement('img');cover.className='video-cover';cover.loading='lazy';cover.referrerPolicy='no-referrer';cover.alt='';cover.src=source;cover.onerror=()=>cover.remove();media.append(cover);}media.append(el('span','▶','play-symbol'));box.append(media);}const info=el('div','','info'),a=el('a',r.title);
  a.href='https://www.bilibili.com/video/'+encodeURIComponent(r.bvid);a.target='_blank';a.rel='noopener noreferrer';
  a.onclick=()=>{recordOpen(r);if(playlistIndex!==null)detail();};
  info.append(a,el('small',r.bvid+' · '+category(r)+(r.confidence==='low'?' · 低置信度倾向':'')));
@@ -73,7 +73,7 @@ function renderResume(container){
  if(t){const link=el('a','回到「'+t.name+'」');link.href='#topic/'+t.id;box.append(link);const next=followingVideo(t,last.bvid,state.watched);if(next){const b=el('button','下一节');b.onclick=()=>{active=t.id;openVideo(rows.find(r=>r.bvid===next));};box.append(b);}}
  container.append(box);
 }
-function setupViewMode(){const toolbar=$('search')?.parentElement;if(!toolbar||$('view-mode'))return;const label=document.createElement('label');label.className='view-mode-label';label.textContent='观看方式';const select=document.createElement('select');select.id='view-mode';select.setAttribute('aria-label','选择观看方式');for(const [value,text] of [['preview','预览卡片'],['list','紧凑列表'],['titles','仅标题']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}select.value=displayMode;select.onchange=()=>{displayMode=select.value;localStorage.setItem('bfc-view-mode',displayMode);library();};label.append(select);toolbar.append(label);}
+function setupViewMode(){const toolbar=$('search')?.parentElement;if(!toolbar||$('view-mode'))return;const group=el('div','','view-switch');group.id='view-mode';group.setAttribute('role','group');group.setAttribute('aria-label','视频显示方式');for(const [value,text] of [['preview','▦ 大卡片'],['list','▥ 小卡片'],['titles','☰ 标题列表']]){const button=el('button',text);button.type='button';button.dataset.mode=value;button.setAttribute('aria-pressed',String(displayMode===value));button.onclick=()=>{displayMode=value;localStorage.setItem('bfc-view-mode',displayMode);for(const item of group.children)item.setAttribute('aria-pressed',String(item.dataset.mode===value));library();};group.append(button);}toolbar.after(group);}
 function navigate(){
  if(!data)return;
  const hash=location.hash.slice(1)||'topics';
