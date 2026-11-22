@@ -8,31 +8,7 @@ function configureOwnerSetup(){
     const el=$(id);if(el)el.hidden=!ownerSetupMode;
   }
 }
-let contestMounted=false,liveAppInitialized=false,contestCleanup=null;
-async function showContestDemo(){
-  if(contestMounted)return;
-  const shell=document.querySelector(".app-shell"),root=$("contest-demo");
-  try{
-    const module=await import("./demo.js");
-    shell.hidden=true;root.hidden=false;contestMounted=true;
-    const url=new URL(location.href);
-    url.searchParams.set("demo","1");
-    history.replaceState(null,"",url.pathname+url.search+url.hash);
-    contestCleanup=module.mountDemo(root,{onExit:()=>{
-      contestCleanup=null;contestMounted=false;
-      root.hidden=true;shell.hidden=false;
-      const back=new URL(location.href);
-      back.searchParams.delete("demo");
-      history.replaceState(null,"",back.pathname+back.search+back.hash);
-      if(!liveAppInitialized)init();
-    }});
-  }catch(error){
-    console.error("[tongpin demo]",error);
-    shell.hidden=false;root.hidden=true;contestMounted=false;
-    if(!liveAppInitialized)await init();
-    else notify("本机交互演示暂不可用，请直接使用真实 APP。",true);
-  }
-}
+let liveAppInitialized=false;
 const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
 }[c]));
@@ -315,7 +291,7 @@ function renderFeed(){
       '<div><span class="overline">DISCOVER TOGETHER</span><h4>从喜欢的内容，遇见同频的人。</h4>'+
       '<p>这里展示真实用户主动公开的精选；还没有真实内容时，可以先体验明确标注的互动演示。</p>'+
       '<div class="spotlight-buttons"><button data-action="discover" class="button button-primary">发现同好 →</button>'+
-      '<button data-action="try-demo" class="button button-soft">体验 APP 演示</button></div></div></div>';
+      '</div></div></div>';
     return;
   }
   const inDraft=state.showcase.some(x=>x.bvid===item.bvid);
@@ -345,7 +321,7 @@ function renderCommunityFeed(){
   if(!state.communityFeed.length){
     target.innerHTML='<div class="community-empty"><strong>还没有人公开分享视频。</strong>'+
       '<p>真实用户尚未主动公开内容。正式视频流不会用虚构视频冒充真实分享。</p>'+
-      '<button class="button button-soft" data-action="try-demo">体验模拟交友流程 →</button></div>';
+      '</div>';
     return;
   }
   const localIds=new Set(state.items.map(video=>video.bvid));
@@ -700,7 +676,7 @@ function renderPeople(){
       (u.showcase||[]).slice(0,8).map(v=>
         '<li><a href="https://www.bilibili.com/video/'+encodeURIComponent(v.bvid)+
         '" target="_blank" rel="noopener noreferrer">在 B站观看《'+escapeHtml(v.title)+'》 ↗</a></li>').join("")+
-      '</ul></details><div class="card-actions meet-actions">'+contact+'</div>'+
+      '</ul></details><div class="card-actions meet-actions"><button class="button button-soft" data-action="space" data-id="'+u.id+'">进入公开空间</button>'+contact+'</div>'+
       '<details class="safety-options"><summary>隐私与安全</summary>'+
       '<button data-action="report" data-id="'+u.id+'">举报</button>'+
       '<button data-action="block" data-id="'+u.id+'">拉黑</button>'+
@@ -708,6 +684,19 @@ function renderPeople(){
   }).join("");
 }
 let candidateRequest=null,candidateRequestEpoch=-1;
+function openSpace(peer){
+  const title=peer.displayName||peer.handle||"同好";
+  $("space-title").textContent=title+" 的公开空间";
+  $("space-meta").textContent="@"+(peer.handle||"")+(peer.city?" · "+peer.city:"");
+  $("space-bio").textContent=peer.bio||"TA 分享了感兴趣的视频，可以从内容开始认识。";
+  $("space-topics").innerHTML=tagsHtml(peer.topics||[]);
+  $("space-videos").innerHTML=(peer.showcase||[]).map(video=>'<li><a href="https://www.bilibili.com/video/'+encodeURIComponent(video.bvid)+'" target="_blank" rel="noopener noreferrer">'+escapeHtml(video.title||video.bvid)+' ↗</a></li>').join("")||"<li>TA 暂未公开视频。</li>";
+  const contact=$("space-contact");
+  contact.textContent=peer.relationship==="accepted"?"进入聊天":peer.relationship==="pending"?"已申请 · 等待回应":"申请认识";
+  contact.disabled=peer.relationship==="pending";
+  contact.onclick=()=>{ $("space-dialog").close(); if(peer.relationship==="accepted") actionHandler({target:{closest:()=>({dataset:{action:"chat",id:peer.id,name:title}})}}); else if(peer.relationship!=="pending") actionHandler({target:{closest:()=>({dataset:{action:"request",id:peer.id}})}}); };
+  $("space-dialog").showModal();
+}
 async function loadCandidatePages({reset=false,pages=3}={}){
   if(candidateRequest && candidateRequestEpoch===state.sessionEpoch)return candidateRequest;
   if(!reset&&state.candidatesLoaded&&Date.now()-state.candidatesLoadedAt>60000)reset=true;
@@ -1050,7 +1039,7 @@ async function actionHandler(event) {
   if(!button)return;
   const {action,id}=button.dataset;
   try {
-    if(action==="try-demo"){showContestDemo();return;}
+    if(action==="space"){const peer=discoveryProfiles().find(item=>item.id===id);if(peer)openSpace(peer);return;}
     if(action==="import"){if(ownerSetupMode)$("browseros-preview-file").click();return;}
     if(action==="discover"){setTab("discover");return;}
     if(action==="showcase"){setTab("showcase");return;}
@@ -1190,8 +1179,7 @@ async function actionHandler(event) {
 function wire() {
   configureOwnerSetup();
   wireBrowserosPreview();
-  $("contest-demo-top").onclick=showContestDemo;
-  $("contest-demo-hero").onclick=showContestDemo;
+  $("close-space").onclick=()=>$("space-dialog").close();
   $("nav").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)setTab(button.dataset.tab);});
   $("library-sharing").onclick=()=>setTab("showcase");
   $("shortcut-showcase").onclick=()=>setTab("showcase");
@@ -1472,10 +1460,6 @@ function wire() {
   };
 }
 async function init() {
-  if(new URLSearchParams(location.search).get("demo")==="1"){
-    await showContestDemo();
-    return;
-  }
   if(liveAppInitialized)return;
   liveAppInitialized=true;
   wire();
@@ -1487,7 +1471,7 @@ async function init() {
   await refreshCommunityFeed();
   // Foreground only: periodic inbox/message refresh is a fallback, not push notifications.
   window.setInterval(async()=>{
-    if(contestMounted || !state.user || document.visibilityState!=="visible")return;
+    if(!state.user || document.visibilityState!=="visible")return;
     if(state.tab==="learning")await refreshStudyPlans();
     await refreshNotifications();
     if(state.tab==="friends"){
